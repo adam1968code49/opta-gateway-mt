@@ -19,6 +19,7 @@ static PlcSnapshot s_local = {};
 #define TAKE(i, var) do { if (s_local.ok[i]) var = s_local.sensor[i]; } while (0)
 
 static void cloudSideAssign() {
+  SHARED_ASSERT_ON_MAIN();
   //  Slot order == SENSOR_TAGS order in plc_tags.h. Same 28 names as the
   //  ASSIGN block in the old pollSensors().
   TAKE( 0, t1HotTank);     TAKE( 1, t2ColdTank);

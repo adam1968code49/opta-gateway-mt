@@ -35,6 +35,7 @@ inline uint32_t plcStackMinFree() { return s_plcStack.minFree(); }
 //  into canonical slots.
 // ---------------------------------------------------------------------
 static void pollSensorsInto(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
   static float rvals[N_REAL];
   static bool  rok[N_REAL];
 
@@ -94,6 +95,7 @@ static void drainCommands() {
 }
 
 static void plcThreadBody() {
+  g_plcThreadId = osThreadGetId();
   s_plcStack.begin();          // shallowest point of this stack
   PlcSnapshot w = {};
   unsigned long reconnectWait = RECONNECT_BACKOFF_MS;

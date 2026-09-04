@@ -153,4 +153,23 @@ static inline bool sharedCmdTake(Cmd& out) {
   return true;
 }
 
+// ---------------------------------------------------------------------
+//  Thread-ownership asserts. Debug builds only. A violation prints once
+//  and spins, which on a bench with the serial console open is the
+//  loudest possible failure and on a deployed board is caught by the
+//  watchdog feeder giving up on the stuck thread.
+// ---------------------------------------------------------------------
+static osThreadId_t g_plcThreadId  = nullptr;
+static osThreadId_t g_mainThreadId = nullptr;
+
+#if ENABLE_SERIAL_DEBUG
+  #define SHARED_ASSERT_ON_PLC()  do { if (g_plcThreadId && osThreadGetId() != g_plcThreadId) { \
+      Serial.println("!! OWNERSHIP: PLC-side code ran off the PLC thread"); for(;;){} } } while (0)
+  #define SHARED_ASSERT_ON_MAIN() do { if (g_mainThreadId && osThreadGetId() != g_mainThreadId) { \
+      Serial.println("!! OWNERSHIP: Cloud* assigned off the main thread"); for(;;){} } } while (0)
+#else
+  #define SHARED_ASSERT_ON_PLC()  do {} while (0)
+  #define SHARED_ASSERT_ON_MAIN() do {} while (0)
+#endif
+
 #endif // SHARED_H
