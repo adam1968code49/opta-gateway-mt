@@ -34,13 +34,38 @@
 //  main can leave a stale Cloud* alone rather than publish a zero.
 // ---------------------------------------------------------------------
 struct PlcSnapshot {
-  static constexpr size_t LASTERR_CAP = 48;
+  static constexpr size_t LASTERR_CAP   = 48;
+  static constexpr size_t FAILTAG_CAP   = 40;
+  static constexpr size_t STATETEXT_CAP = 128;
 
   uint32_t seq;            // monotonic, bumped on every publish
   uint32_t stampMs;        // millis() at publish, so main can age it
+
+  // ---- sensors (batch 0) ----
   float    sensor[N_SENSORS];
   bool     ok[N_SENSORS];
-  int32_t  fails;          // slots not read this tick
+  int32_t  fails;          // sensor slots not read this tick
+
+  // ---- valves / pumps / positions / fault flags / heat-pump St_* (batch 1) ----
+  //  Slot order == VALVE_TAGS. BOOL tags arrive as 0.0/1.0; main tests > 0.5.
+  float    valve[N_VALVE];
+  bool     valveOk[N_VALVE];
+  int32_t  valveFails;                 // -> plcReadFails
+  char     failTag[FAILTAG_CAP];       // first failing valve-sweep tag, "ok" when none
+
+  // ---- PLC state words (batch 1, every 3rd tick) ----
+  uint32_t actionWord;                 // bit N = Action_(N+1)
+  uint32_t stateWord;                  // Start,Stop,Reset,Purge,State_1,State_2,Fan1,Fan2,TopA,TopB,BotA,BotB
+  char     stateText[STATETEXT_CAP];   // one line, '?' prefix when a tag was unread
+  int32_t  stateFails;
+  uint32_t stateSeq;                   // +1 each time the state sweep ran; main assigns only on change
+  int32_t  adsorpElapsedS;             // Timer_3.ACC / 1000
+  int32_t  desorpElapsedT6S;           // Timer_6[3].ACC / 1000
+  int32_t  desorpElapsedT11S;          // Timer_11[3].ACC / 1000
+  int32_t  adsorpPreMin;               // Timer_3.PRE / 60000, 0 = not read
+  int32_t  desorpPreMin;               // Timer_6[3].PRE / 60000, 0 = not read
+
+  // ---- link / diagnostics ----
   bool     plcConnected;
   int32_t  eipMs;          // duration of the last eip.begin() attempt, ms
   uint16_t lastCipStatus;

@@ -31,6 +31,8 @@
 #include "plc_thread.h"
 #include "cloud_side.h"
 static_assert(N_VALVE == 36 && N_STATE == 27 && N_ACTION == 15, "batch 1 sweep tables");
+static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
+static_assert(sizeof(PlcSnapshot) < 700, "snapshot grew past 700 B");
 
 // ---- the CIP client: DEFINED here, USED only by the PLC thread ----------
 EthernetClient   plcTransport;
