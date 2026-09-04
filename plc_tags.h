@@ -157,4 +157,59 @@ static_assert(sizeof(REAL_SLOT) / sizeof(REAL_SLOT[0]) == N_REAL,
 static_assert(sizeof(DINT_SLOT) / sizeof(DINT_SLOT[0]) == N_DINT,
               "DINT_SLOT length must match DINT_TAGS");
 
+// ---------------------------------------------------------------------
+//  BATCH 1: control tags, cycle timers, valve sweep, state sweep.
+//  Control/timer names are verbatim from opta-plc-gateway-ip2.ino 178-221;
+//  the valve/state name macros live in config.h (no #if guard).
+// ---------------------------------------------------------------------
+#define TAG_START_BUTTON    "Start_Button"
+#define TAG_STOP_BUTTON     "Stop_Button"
+#define TAG_ADSORP_TIME     "Timer_3.PRE"        // DINT, ms
+#define TAG_ADSORP_ACC      "Timer_3.ACC"        // DINT, ms elapsed
+#define MS_PER_MIN          60000L
+#define ADSORP_TIME_MIN_MIN 5                    // lower clamp (minutes)
+#define ADSORP_TIME_MAX_MIN 60                   // upper clamp (minutes)
+#define TAG_DESORP_PRE_T6   "Timer_6[3].PRE"     // top chamber
+#define TAG_DESORP_PRE_T11  "Timer_11[3].PRE"    // bottom chamber
+#define TAG_DESORP_ACC_T6   "Timer_6[3].ACC"
+#define TAG_DESORP_ACC_T11  "Timer_11[3].ACC"
+#define DESORP_TIME_MIN_MIN 10
+#define DESORP_TIME_MAX_MIN 60
+
+//  Valve / pump / position sweep. Slot order is a contract with
+//  cloud_side.h's TAKE_V* list; verbatim from the old VALVE_TAGS.
+static const char* const VALVE_TAGS[] = {
+  TAG_V_S1,   TAG_V_S5,   TAG_V_S6,   TAG_V_S7,   TAG_V_S10,      //  0.. 4
+  TAG_V_V1A,  TAG_V_V1B,  TAG_V_V2A1, TAG_V_V2A2, TAG_V_V2B,      //  5.. 9
+  TAG_P_SCROLL, TAG_P_COND, TAG_P_HOTW, TAG_P_COLDW,              // 10..13
+  TAG_P_BVFDRUN,                                                  // 14
+  TAG_POS_S2, TAG_POS_S3, TAG_POS_S4, TAG_POS_S8, TAG_POS_S9,     // 15..19
+  TAG_POS_V10, TAG_POS_V11,                                       // 20..21
+  TAG_DISPLAY_WATERVOL, TAG_CUMUL_WATERVOL,                       // 22..23  read-back only in batch 1
+  TAG_PRESS_ERROR, TAG_TEMP_ERROR, TAG_GEN_ERROR,                 // 24..26
+  TAG_ST_STAGE1, TAG_ST_STAGE2, TAG_ST_AUXHEAT,                   // 27..29
+  TAG_ST_INDOORCIRC, TAG_ST_INDOORFLOW, TAG_ST_OUTDOORFLOW,       // 30..32
+  TAG_ST_LOCKOUT, TAG_ST_PHASEFAULT, TAG_ST_BACNETCTL             // 33..35
+};
+#define N_VALVE (sizeof(VALVE_TAGS) / sizeof(VALVE_TAGS[0]))
+
+//  State sweep: 15 Action bits then 12 button/state/fan/door bits.
+//  plcActionWord bit N = Action_(N+1); plcStateWord bit order is FIXED
+//  (config.h comment): Start, Stop, Reset, Purge, State_1, State_2, Fan1,
+//  Fan2, TopA, TopB, BotA, BotB.
+static const char* const STATE_TAGS[] = {
+  TAG_ACTION_1,  TAG_ACTION_2,  TAG_ACTION_3,  TAG_ACTION_4,  TAG_ACTION_5,
+  TAG_ACTION_6,  TAG_ACTION_7,  TAG_ACTION_8,  TAG_ACTION_9,  TAG_ACTION_10,
+  TAG_ACTION_11, TAG_ACTION_12, TAG_ACTION_13, TAG_ACTION_14, TAG_ACTION_15,
+  TAG_START_BUTTON, TAG_STOP_BUTTON, TAG_RESET_BUTTON, TAG_PURGE_BUTTON,
+  TAG_STATE_1, TAG_STATE_2, TAG_FAN1, TAG_FAN2,
+  TAG_IND_TOPA, TAG_IND_TOPB, TAG_IND_BOTA, TAG_IND_BOTB
+};
+#define N_STATE  (sizeof(STATE_TAGS) / sizeof(STATE_TAGS[0]))
+#define N_ACTION 15
+
+static_assert(N_VALVE == 36,  "cloud_side.h TAKE_V* list covers 36 valve slots");
+static_assert(N_STATE == 27,  "15 actions + 12 state bits");
+static_assert(N_ACTION < N_STATE, "action bits come first");
+
 #endif // PLC_TAGS_H
