@@ -5,10 +5,15 @@
 //  THE PLC THREAD. Owns eip. Nobody else calls it.
 //
 //  Every 2 s: reconnect if needed (knocking first with plcProbe so a
-//  powered-off PLC costs 0.3 s, not 28), sweep the 28 sensor tags into
-//  the working snapshot, drain the command queue, publish. Blocking in
-//  here -- the eip connect, CIP I/O -- is now this thread's problem alone.
-//  Main keeps publishing to the cloud while this thread waits on a socket.
+//  powered-off PLC costs 0.3 s, not 28), sweep sensors and valves into the
+//  working snapshot, every third tick sweep the state words and timers,
+//  drain the command queue into eip.write*, publish. Blocking in here --
+//  the eip connect, CIP I/O -- is this thread's problem alone. Main keeps
+//  publishing to the cloud while this thread waits on a socket.
+//
+//  Every eip.read* goes through beatReadReals / beatReadDint, which beat
+//  the watchdog after each bounded exchange: a tick of eight MSP chunks
+//  and a dozen DINT reads against a half-dead PLC is "alive", not "stuck".
 // =====================================================================
 
 #include <mbed.h>
@@ -22,6 +27,7 @@
 #include "wd_feeder.h"
 
 #define PLC_THREAD_STACK   16384
+#define STATE_EVERY_TICKS  3          // 6 s at SAMPLE_INTERVAL_MS 2000
 
 extern EtherNetIPClient eip;       // defined in the .ino, as before
 extern IPAddress        plcIp;
@@ -30,9 +36,46 @@ static StackWatch s_plcStack;
 inline uint32_t plcStackMinFree() { return s_plcStack.minFree(); }
 
 // ---------------------------------------------------------------------
-//  Read every sensor tag into w.sensor[] / w.ok[]. Unchanged algorithm:
-//  22 REALs in batched MSP reads, 6 DINTs singly with scaling, scattered
-//  into canonical slots.
+//  The only two places this file touches eip.read*. Chunked MSP with a
+//  beat after every chunk; a failed exchange marks its chunk unread.
+// ---------------------------------------------------------------------
+static void beatReadReals(const char* const* tags, float* out, bool* ok, size_t n) {
+  size_t done = 0;
+  while (done < n) {
+    size_t chunk = n - done;
+    if (chunk > EIP_MAX_MSP_TAGS) chunk = EIP_MAX_MSP_TAGS;
+    if (!eip.readRealsMSP(tags + done, out + done, ok + done, chunk))
+      for (size_t k = 0; k < chunk; k++) ok[done + k] = false;
+    wdBeatPlc();
+    done += chunk;
+  }
+}
+
+static bool beatReadDint(const char* tag, int32_t& out) {
+  bool r = eip.readDint(tag, out);
+  wdBeatPlc();
+  return r;
+}
+
+// ---------------------------------------------------------------------
+//  Name failing tags only when the pattern changes, compared as an
+//  ARRAY (a bitmask broke silently at 36 entries in the old firmware).
+// ---------------------------------------------------------------------
+template <size_t N>
+static void logFailChanges(const char* who, const bool (&ok)[N], const char* const* tags,
+                           bool (&prevOk)[N], bool& prevValid) {
+  bool changed = !prevValid;
+  for (size_t k = 0; k < N; k++) if (ok[k] != prevOk[k]) changed = true;
+  if (!changed) return;
+  for (size_t k = 0; k < N; k++) prevOk[k] = ok[k];
+  prevValid = true;
+  for (size_t k = 0; k < N; k++)
+    if (!ok[k]) { LOG(who); LOG(" read FAIL: "); LOGLN(tags[k]); }
+}
+
+// ---------------------------------------------------------------------
+//  Sensors: 22 REALs batched, 6 DINTs singly with scaling, scattered
+//  into canonical slots. Unchanged algorithm from batch 0.
 // ---------------------------------------------------------------------
 static void pollSensorsInto(PlcSnapshot& w) {
   SHARED_ASSERT_ON_PLC();
@@ -41,7 +84,7 @@ static void pollSensorsInto(PlcSnapshot& w) {
 
   for (size_t k = 0; k < N_SENSORS; k++) w.ok[k] = false;
 
-  eip.readRealsMultiple(REAL_TAGS, rvals, rok, N_REAL);
+  beatReadReals(REAL_TAGS, rvals, rok, N_REAL);
   for (size_t k = 0; k < N_REAL; k++) {
     w.sensor[REAL_SLOT[k]] = rvals[k];
     w.ok    [REAL_SLOT[k]] = rok[k];
@@ -49,7 +92,7 @@ static void pollSensorsInto(PlcSnapshot& w) {
 
   for (size_t k = 0; k < N_DINT; k++) {
     int32_t raw = 0;
-    if (eip.readDint(DINT_TAGS[k], raw)) {
+    if (beatReadDint(DINT_TAGS[k], raw)) {
       w.sensor[DINT_SLOT[k]] = (float)raw * DINT_SCALE[k] + DINT_OFFSET[k];
       w.ok    [DINT_SLOT[k]] = true;
     }
@@ -60,15 +103,9 @@ static void pollSensorsInto(PlcSnapshot& w) {
   w.fails = (int32_t)N_SENSORS - (int32_t)good;
   w.lastCipStatus = eip.lastCipStatus();
 
-  //  Name the failing tags only when the pattern changes, not every tick.
-  static uint32_t lastFailMask = 0;
-  uint32_t failMask = 0;
-  for (size_t k = 0; k < N_SENSORS; k++) if (!w.ok[k]) failMask |= (1UL << k);
-  if (failMask != lastFailMask) {
-    lastFailMask = failMask;
-    for (size_t k = 0; k < N_SENSORS; k++)
-      if (!w.ok[k]) { LOG("[EIP] read FAIL: "); LOGLN(SENSOR_TAGS[k]); }
-  }
+  static bool prevOk[N_SENSORS];
+  static bool prevValid = false;
+  logFailChanges("[EIP]", w.ok, SENSOR_TAGS, prevOk, prevValid);
 
   if (w.fails == 0) {
     w.plcConnected = true;
@@ -83,14 +120,168 @@ static void pollSensorsInto(PlcSnapshot& w) {
 }
 
 // ---------------------------------------------------------------------
-//  Batch 0 drains the queue and logs. Batch 1 replaces the LOG with the
-//  eip.write* per CmdTag. Draining now keeps the queue from filling if
-//  anything posts to it early.
+//  Valves, pumps, positions, fault flags, heat-pump St_* bits: 36 tags,
+//  three MSP chunks, straight into w.valve[] / w.valveOk[].
 // ---------------------------------------------------------------------
-static void drainCommands() {
+static void pollValvesInto(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
+  wdWherePlc(WD_AT_VALVES);
+  for (size_t k = 0; k < N_VALVE; k++) w.valveOk[k] = false;
+
+  beatReadReals(VALVE_TAGS, w.valve, w.valveOk, N_VALVE);
+
+  static bool prevOk[N_VALVE];
+  static bool prevValid = false;
+  logFailChanges("[VLV]", w.valveOk, VALVE_TAGS, prevOk, prevValid);
+
+  int32_t nfail = 0;
+  const char* firstBad = nullptr;
+  for (size_t k = 0; k < N_VALVE; k++)
+    if (!w.valveOk[k]) { nfail++; if (!firstBad) firstBad = VALVE_TAGS[k]; }
+  w.valveFails = nfail;
+  snprintf(w.failTag, PlcSnapshot::FAILTAG_CAP, "%s", firstBad ? firstBad : "ok");
+}
+
+// ---------------------------------------------------------------------
+//  State words and cycle timers, every STATE_EVERY_TICKS ticks. Same
+//  decode and same one-line text as the old pollPlcState(): only SET bits
+//  appear, '?' prefix means at least one tag did not answer.
+// ---------------------------------------------------------------------
+static void pollPlcStateInto(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
+  wdWherePlc(WD_AT_PLCSTATE);
+  static float vals[N_STATE];
+  static bool  ok[N_STATE];
+  beatReadReals(STATE_TAGS, vals, ok, N_STATE);
+
+  uint32_t act = 0, st = 0;
+  int32_t fails = 0;
+  for (size_t k = 0; k < N_STATE; k++) {
+    if (!ok[k]) { fails++; continue; }
+    if (vals[k] < 0.5f) continue;          // BOOL arrives as 0.0/1.0
+    if (k < N_ACTION) act |= (1UL << k);
+    else              st  |= (1UL << (k - N_ACTION));
+  }
+  w.actionWord = act;
+  w.stateWord  = st;
+  w.stateFails = fails;
+
+  static const char* const ACT_N[N_ACTION] = {
+    "A1","A2","A3","A4","A5","A6","A7","A8","A9","A10","A11","A12","A13","A14","A15" };
+  static const char* const ST_N[N_STATE - N_ACTION] = {
+    "START","STOP","RESET","PURGE","State1","State2","Fan1","Fan2",
+    "TopA","TopB","BotA","BotB" };
+
+  char*  txt = w.stateText;
+  size_t cap = PlcSnapshot::STATETEXT_CAP;
+  size_t used = 0;
+  txt[0] = 0;
+  if (fails) used += snprintf(txt + used, cap - used, "? ");
+  bool any = false;
+  for (size_t k = 0; k < N_ACTION && used < cap - 12; k++)
+    if (act & (1UL << k)) {
+      used += snprintf(txt + used, cap - used, "%s%s", any ? "," : "", ACT_N[k]);
+      any = true;
+    }
+  if (!any) used += snprintf(txt + used, cap - used, "no action");
+  used += snprintf(txt + used, cap - used, " |");
+  for (size_t k = 0; k < N_STATE - N_ACTION && used < cap - 10; k++)
+    if (st & (1UL << k))
+      used += snprintf(txt + used, cap - used, " %s", ST_N[k]);
+
+  static bool prevOk[N_STATE];
+  static bool prevValid = false;
+  logFailChanges("[SEQ]", ok, STATE_TAGS, prevOk, prevValid);
+  if (fails) { LOG("[SEQ] "); LOG(fails); LOG(" of "); LOG((int)N_STATE); LOGLN(" state tags unread"); }
+
+  //  Cycle timers: elapsed is the new information; the presets are re-read
+  //  so the dashboard shows what the PLC is actually running.
+  int32_t v = 0;
+  if (beatReadDint(TAG_ADSORP_ACC, v))     w.adsorpElapsedS    = v / 1000;
+  if (beatReadDint(TAG_DESORP_ACC_T6, v))  w.desorpElapsedT6S  = v / 1000;
+  if (beatReadDint(TAG_DESORP_ACC_T11, v)) w.desorpElapsedT11S = v / 1000;
+  w.adsorpPreMin = (beatReadDint(TAG_ADSORP_TIME, v)   && v > 0) ? (int32_t)(v / MS_PER_MIN) : 0;
+  w.desorpPreMin = (beatReadDint(TAG_DESORP_PRE_T6, v) && v > 0) ? (int32_t)(v / MS_PER_MIN) : 0;
+
+  w.stateSeq++;
+}
+
+// ---------------------------------------------------------------------
+//  Commands from main. The gate is checked again here: a controlEnabled
+//  that went false between the post and this tick drops the queue. Every
+//  write reports into w.lastError with the old firmware's wording so the
+//  dashboard reads the same.
+// ---------------------------------------------------------------------
+static void applyCommand(PlcSnapshot& w, const Cmd& c) {
+  const bool on = c.value != 0.0f;
+  bool ok = false;
+  switch (c.tag) {
+    case CMD_START_BUTTON:
+      ok = eip.writeBool(TAG_START_BUTTON, on);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? (on ? "start set" : "start cleared") : "Start_Button write failed");
+      break;
+    case CMD_STOP_BUTTON:
+      ok = eip.writeBool(TAG_STOP_BUTTON, on);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? (on ? "stop set" : "stop cleared") : "write Stop_Button failed");
+      break;
+    case CMD_RESET_BUTTON:
+      ok = eip.writeBool(TAG_RESET_BUTTON, on);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? (on ? "reset set" : "reset cleared") : "write Reset_Button failed");
+      break;
+    case CMD_PURGE_BUTTON:
+      ok = eip.writeBool(TAG_PURGE_BUTTON, on);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? (on ? "purge set" : "purge cleared") : "write Purge_Button failed");
+      break;
+    case CMD_ADSORP_TIME_MS: {
+      int32_t mins = (int32_t)c.value;
+      ok = eip.writeDint(TAG_ADSORP_TIME, mins * MS_PER_MIN);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? "adsorp time set" : "write Timer_3.PRE failed");
+      break;
+    }
+    case CMD_DESORP_TIME_MS: {
+      int32_t mins = (int32_t)c.value;
+      int32_t ms   = mins * MS_PER_MIN;
+      bool okT6  = eip.writeDint(TAG_DESORP_PRE_T6,  ms);
+      wdBeatPlc();
+      bool okT11 = eip.writeDint(TAG_DESORP_PRE_T11, ms);
+      ok = okT6 && okT11;
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? "desorp time set"
+                  : (!okT6 && !okT11) ? "write Timer_6/11[3].PRE failed"
+                  : !okT6 ? "write Timer_6[3].PRE failed"
+                          : "write Timer_11[3].PRE failed");
+      break;
+    }
+    default:
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
+      break;
+  }
+  wdBeatPlc();
+  LOG("[CTRL] cmd "); LOG(c.tag); LOG(" value="); LOG(c.value);
+  LOG(" -> "); LOG(ok ? "OK" : "FAIL"); LOG(" (cip=0x"); LOG(eip.lastCipStatus(), HEX); LOGLN(")");
+}
+
+static void drainCommands(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
+  CtrlState ctrl;
+  sharedCtrlRead(ctrl);
   Cmd c;
   while (sharedCmdTake(c)) {
-    LOG("[PLC] cmd tag="); LOG(c.tag); LOG(" value="); LOGLN(c.value);
+    if (!ctrl.controlEnabled) {
+      LOG("[CTRL] dropped, control disabled: tag="); LOGLN(c.tag);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control disabled");
+      continue;
+    }
+    if (!eip.connected()) {
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control: plc offline");
+      continue;
+    }
+    applyCommand(w, c);
   }
 }
 
@@ -100,6 +291,7 @@ static void plcThreadBody() {
   PlcSnapshot w = {};
   unsigned long reconnectWait = RECONNECT_BACKOFF_MS;
   unsigned long lastReconnect = 0;
+  uint32_t tickN = 0;
   LOGLN("[PLC] thread started");
 
   for (;;) {
@@ -108,6 +300,10 @@ static void plcThreadBody() {
 
     if (!eip.connected()) {
       w.plcConnected = false;
+      //  Nothing was read this tick: say so, or main would keep treating
+      //  last tick's values as fresh.
+      for (size_t k = 0; k < N_SENSORS; k++) w.ok[k] = false;
+      for (size_t k = 0; k < N_VALVE;   k++) w.valveOk[k] = false;
       if (tick0 - lastReconnect >= reconnectWait) {
         lastReconnect = tick0;
         wdWherePlc(WD_AT_PLCPROBE);
@@ -131,12 +327,21 @@ static void plcThreadBody() {
           LOG("[EIP] reconnect failed, next in "); LOG(reconnectWait / 1000); LOGLN(" s");
         }
       }
+      //  A command posted while the PLC is away must not sit in the queue
+      //  and fire on reconnect. drainCommands reports "plc offline".
+      wdWherePlc(WD_AT_CIPWRITE);
+      drainCommands(w);
     } else {
       wdWherePlc(WD_AT_SENSORS);
       pollSensorsInto(w);
+      if (eip.connected()) {
+        pollValvesInto(w);
+        if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
+      }
       wdWherePlc(WD_AT_CIPWRITE);
-      drainCommands();
+      drainCommands(w);
     }
+    tickN++;
 
     s_plcStack.sample();
     w.plcStackFree = s_plcStack.minFree();
@@ -146,8 +351,6 @@ static void plcThreadBody() {
     sharedPublish(w);
     wdWherePlc(WD_AT_NONE);
 
-    //  Sleep out the remainder of the tick. A pass that overran (a slow
-    //  connect) simply starts the next one immediately.
     unsigned long spent = millis() - tick0;
     if (spent < SAMPLE_INTERVAL_MS)
       rtos::ThisThread::sleep_for(std::chrono::milliseconds(SAMPLE_INTERVAL_MS - spent));
