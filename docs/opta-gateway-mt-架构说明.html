@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>opta-gateway-mt 软件架构说明</title>
+<style>
+@page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+html,body{margin:0;padding:0;background:#fff;color:#1c1f24;font-family:"Microsoft YaHei","微软雅黑","Segoe UI",sans-serif;font-size:10.5pt;line-height:1.62;}
+h1{font-size:22pt;margin:0 0 6pt;letter-spacing:.5px}
+h2{font-size:15pt;margin:0 0 8pt;padding-bottom:4pt;border-bottom:2px solid #2b5fa8;color:#1f3f6e;page-break-after:avoid}
+h3{font-size:11.5pt;margin:12pt 0 4pt;color:#2b5fa8;page-break-after:avoid}
+p{margin:0 0 6pt;text-align:justify}
+.page{page-break-after:always}
+.page:last-child{page-break-after:auto}
+.cover{height:250mm;display:flex;flex-direction:column;justify-content:center}
+.cover .sub{font-size:13pt;color:#556;margin-top:4pt}
+.cover .meta{margin-top:40pt;font-size:10pt;color:#445;border-left:3px solid #2b5fa8;padding-left:10pt}
+.cover .meta div{margin:2pt 0}
+table{border-collapse:collapse;width:100%;margin:4pt 0 8pt;font-size:9.2pt;page-break-inside:auto}
+tr{page-break-inside:avoid}
+th,td{border:1px solid #c9d0da;padding:3pt 5pt;vertical-align:top;text-align:left}
+th{background:#eef3fa;color:#1f3f6e;font-weight:600}
+td.c,th.c{text-align:center}
+code,.mono{font-family:Consolas,"Cascadia Mono","Courier New",monospace;font-size:9pt;background:#f3f5f8;padding:0 3px;border-radius:2px}
+pre{font-family:Consolas,"Cascadia Mono","Courier New",monospace;font-size:8.6pt;background:#f6f7f9;border:1px solid #dfe3e9;border-left:3px solid #2b5fa8;padding:6pt 8pt;margin:4pt 0 8pt;white-space:pre-wrap;line-height:1.45;page-break-inside:avoid}
+.box{border:1px solid #d5dbe4;border-radius:4px;padding:6pt 9pt;margin:6pt 0 8pt;background:#fafbfd;page-break-inside:avoid}
+.box.warn{border-color:#e0a54a;background:#fff8ec}
+.box.key{border-color:#2b5fa8;background:#eef3fa}
+.box b{color:#1f3f6e}
+.fig{margin:6pt 0 8pt;page-break-inside:avoid;text-align:center}
+.fig svg{max-width:100%;height:auto}
+.cap{font-size:9pt;color:#556;margin-top:2pt}
+ul,ol{margin:2pt 0 6pt 0;padding-left:18pt}
+li{margin:1pt 0}
+.toc li{margin:2pt 0}
+.small{font-size:9pt;color:#556}
+.tag{display:inline-block;font-size:8.5pt;padding:0 5px;border-radius:9px;color:#fff;vertical-align:middle}
+.tag.m{background:#2b5fa8}.tag.p{background:#2e8b57}.tag.w{background:#d9822b}.tag.s{background:#7a5cb3}
+.two{display:flex;gap:10pt}.two>div{flex:1}
+</style></head><body>
+
+<!-- ================= 封面 ================= -->
+<div class="page cover">
+  <div style="color:#2b5fa8;font-size:11pt;letter-spacing:2px">ATOCO · IP2 大气取水机 · Opta 网关</div>
+  <h1>opta-gateway-mt 软件架构说明</h1>
+  <div class="sub">双线程网关固件：PLC 线程 + 云端主线程 + 喂狗线程</div>
+  <div class="meta">
+    <div>固件版本：<span class="mono">a43c01d</span>（批 0，2026-09-04 经 OTA 上板）</div>
+    <div>仓库：<span class="mono">ATOCO_CONTROL/opta-gateway-mt/</span>（独立 git）</div>
+    <div>硬件：Arduino Opta（STM32H747 Cortex-M7，mbed OS 6，Arduino mbed core 4.6.0）</div>
+    <div>读者：需要看懂整个数据流、线程边界和故障行为的工程师</div>
+    <div>生成日期：2026-09-04</div>
+  </div>
+  <div style="margin-top:50pt" class="small">
+    本文按"先整体、再逐层、最后故障与演进"的顺序组织。每一节都能独立阅读；
+    图中颜色固定：<span class="tag m">主线程</span> <span class="tag p">PLC 线程</span> <span class="tag w">喂狗线程</span> <span class="tag s">共享面</span>。
+  </div>
+</div>
+
+<!-- ================= 目录 ================= -->
+<div class="page">
+<h2>目录</h2>
+<ol class="toc">
+  <li>为什么要拆成两个线程</li>
+  <li>系统全貌</li>
+  <li>线程与所有权</li>
+  <li>文件地图</li>
+  <li>共享面 shared.h：两个线程唯一的接触点</li>
+  <li>PLC 线程：每 2 秒一拍</li>
+  <li>主线程：setup() 与 loop()</li>
+  <li>快照的一生：从 PLC 标签到云端属性</li>
+  <li>喂狗线程：看两条心跳，怪较旧的那条</li>
+  <li>两个探针：先敲门，再进门</li>
+  <li>启动序列</li>
+  <li>四种故障与固件的反应</li>
+  <li>云端属性清单</li>
+  <li>与旧固件的对比、批次路线图</li>
+  <li>批 1 之前要知道的事</li>
+  <li>术语表</li>
+</ol>
+<div class="box key"><b>一句话版本。</b>PLC 线程独占 EtherNet/IP 客户端，每 2 秒把 28 个传感器读进一个约 220 字节的纯数据快照，加锁拷贝一次发布出去；主线程独占全部云端属性和 <code>ArduinoCloud.update()</code>，每趟 loop 加锁把快照拷回来，序号变了就逐槽赋给云属性。两个线程各打各的心跳，喂狗线程取较旧的那条判断有没有卡死。任何一边阻塞，另一边照常工作。</div>
+</div>
+
+<!-- ================= 1 ================= -->
+<div class="page">
+<h2>1. 为什么要拆成两个线程</h2>
+<p>旧固件（<span class="mono">opta-plc-gateway-ip2.ino</span>，2587 行单文件）是单线程：<code>loop()</code> 里依次做 PLC 读取、云端 <code>update()</code>、日志、诊断。ArduinoIoTCloud 库在 <code>update()</code> 内部默认武装一个 <b>32.76 秒</b> 的硬件看门狗，并且<b>只在 <code>update()</code> 里喂</b>。于是 <code>loop()</code> 里任何一处超过 32 秒的阻塞都会让板子被硬件复位。</p>
+<p>实测两处这样的阻塞：</p>
+<table>
+<tr><th>阻塞点</th><th>触发条件</th><th>实测时长</th><th>后果</th></tr>
+<tr><td><code>eip.begin()</code>（PLC 的 TCP 连接）</td><td>PLC 断电或网线拔掉</td><td>27.7 s</td><td>逼近看门狗窗口；与其他延迟叠加即复位</td></tr>
+<tr><td><code>ArduinoCloud.update()</code> 内的 TLS 重连</td><td>WiFi 通、但到 iot.arduino.cc 的链路断</td><td>110 s 以上</td><td>直接复位；过夜 6 次重启全部落在这里</td></tr>
+</table>
+<p>先后加过三层缓解：独立喂狗线程、PLC 探针（先用 300 ms 的 TCP 敲门再 <code>begin()</code>）、云端探针（先敲 8885 端口再进 <code>update()</code>）。重启从 13–77 分钟一次降到 2–4 小时一次，但没归零，因为根子在于<b>一个线程里放了两个各自都可能长阻塞的 I/O 对象</b>。</p>
+<div class="box key"><b>结构性解法。</b>把两个会阻塞的对象分到两个线程：EtherNet/IP 客户端归 PLC 线程，云端连接归主线程。一边阻塞只卡自己，喂狗线程仍能看到另一边活着。这就是 <span class="mono">opta-gateway-mt</span>。</div>
+<h3>设计原则（贯穿全部代码）</h3>
+<ul>
+<li><b>每个可阻塞对象只有一个 owner。</b><code>eip</code> 只在 PLC 线程被调用；<code>Cloud*</code> 属性只在主线程被赋值。调试构建里有断言宏在违规时打印并自旋。</li>
+<li><b>跨线程只传纯数据。</b>快照里没有 <code>String</code>、没有指针，用 <code>static_assert(is_trivially_copyable)</code> 在编译期锁死。原因：一个线程赋值 <code>String</code> 的同时另一个线程在序列化它，就是 use-after-free。</li>
+<li><b>锁里只做一次结构体拷贝。</b>不做 I/O、不做分配。全仓库只有一把锁、四个持锁函数、每个的临界区就是一行拷贝。</li>
+<li><b>主线程永远不等 PLC 线程。</b>命令队列用非阻塞的 <code>try_alloc / try_get</code>，队列满了就丢并计数。</li>
+<li><b>先敲门再进门。</b>任何无界的 connect 之前，先用带超时的原生 TCP socket 探一下端口开不开。</li>
+</ul>
+</div>
+
+<!-- ================= 2 ================= -->
+<div class="page">
+<h2>2. 系统全貌</h2>
+<div class="fig">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif" font-size="11">
+  <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#445"/></marker></defs>
+  <rect x="20" y="120" width="120" height="90" rx="6" fill="#f4f6f9" stroke="#8a94a6"/>
+  <text x="80" y="150" text-anchor="middle" font-weight="600">AB PLC</text>
+  <text x="80" y="168" text-anchor="middle" font-size="9.5">192.168.102.21</text>
+  <text x="80" y="184" text-anchor="middle" font-size="9.5">EtherNet/IP :44818</text>
+  <text x="80" y="200" text-anchor="middle" font-size="9.5">28 个标签（22 REAL + 6 DINT）</text>
+  <line x1="140" y1="165" x2="215" y2="165" stroke="#445" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="215" y1="172" x2="140" y2="172" stroke="#445" stroke-width="1.5" marker-end="url(#ar)"/>
+  <text x="178" y="155" text-anchor="middle" font-size="9">以太网（静态 IP）</text>
+  <rect x="215" y="30" width="330" height="270" rx="8" fill="#fff" stroke="#1c1f24" stroke-width="1.5"/>
+  <text x="380" y="50" text-anchor="middle" font-weight="700" font-size="12.5">Arduino Opta · opta-gateway-mt</text>
+  <rect x="230" y="65" width="130" height="150" rx="5" fill="#e8f5ee" stroke="#2e8b57" stroke-width="1.5"/>
+  <text x="295" y="84" text-anchor="middle" font-weight="600" fill="#1f6b3f">PLC 线程</text>
+  <text x="295" y="100" text-anchor="middle" font-size="9">plc_thread.h · 栈 16 KB</text>
+  <text x="295" y="118" text-anchor="middle" font-size="9.5">独占 eip</text>
+  <text x="295" y="134" text-anchor="middle" font-size="9.5">每 2 s：探针→连接</text>
+  <text x="295" y="150" text-anchor="middle" font-size="9.5">扫 28 标签→快照</text>
+  <text x="295" y="166" text-anchor="middle" font-size="9.5">排空命令队列</text>
+  <text x="295" y="182" text-anchor="middle" font-size="9.5">sharedPublish()</text>
+  <text x="295" y="200" text-anchor="middle" font-size="9">wdBeatPlc()</text>
+  <rect x="368" y="95" width="24" height="90" rx="4" fill="#efe9f7" stroke="#7a5cb3" stroke-width="1.5"/>
+  <text x="380" y="145" text-anchor="middle" font-size="9" fill="#4d3a80" transform="rotate(-90 380 140)">shared.h</text>
+  <line x1="360" y1="120" x2="368" y2="120" stroke="#7a5cb3" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="392" y1="120" x2="400" y2="120" stroke="#7a5cb3" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="400" y1="160" x2="392" y2="160" stroke="#7a5cb3" stroke-width="1.5" marker-end="url(#ar)" stroke-dasharray="3 2"/>
+  <line x1="368" y1="160" x2="360" y2="160" stroke="#7a5cb3" stroke-width="1.5" marker-end="url(#ar)" stroke-dasharray="3 2"/>
+  <rect x="400" y="65" width="130" height="150" rx="5" fill="#e9f0fa" stroke="#2b5fa8" stroke-width="1.5"/>
+  <text x="465" y="84" text-anchor="middle" font-weight="600" fill="#1f3f6e">主线程</text>
+  <text x="465" y="100" text-anchor="middle" font-size="9">.ino · setup/loop</text>
+  <text x="465" y="118" text-anchor="middle" font-size="9.5">独占 Cloud* 属性</text>
+  <text x="465" y="134" text-anchor="middle" font-size="9.5">sharedTake()→赋值</text>
+  <text x="465" y="150" text-anchor="middle" font-size="9.5">云探针门→update()</text>
+  <text x="465" y="166" text-anchor="middle" font-size="9.5">web 配置页 · 诊断</text>
+  <text x="465" y="182" text-anchor="middle" font-size="9.5">OTA 回调</text>
+  <text x="465" y="200" text-anchor="middle" font-size="9">wdBeatMain()</text>
+  <rect x="224" y="226" width="312" height="66" rx="5" fill="#fdf1e3" stroke="#d9822b" stroke-width="1.5"/>
+  <text x="380" y="243" text-anchor="middle" font-weight="600" fill="#8a4f10">喂狗线程 wd_feeder.h · 栈 2 KB · 高优先级</text>
+  <text x="380" y="259" text-anchor="middle" font-size="8.5">每 2 s：stall = max(距主线程心跳, 距 PLC 心跳)</text>
+  <text x="380" y="272" text-anchor="middle" font-size="8.5">stall &lt; 60 s 踢狗；否则放手，硬件复位</text>
+  <text x="380" y="285" text-anchor="middle" font-size="8">硬件看门狗窗口 32.76 s，由 ArduinoIoTCloud 在 update() 内武装</text>
+  <line x1="295" y1="215" x2="295" y2="228" stroke="#d9822b" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="465" y1="215" x2="465" y2="228" stroke="#d9822b" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="545" y1="130" x2="615" y2="130" stroke="#445" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="615" y1="137" x2="545" y2="137" stroke="#445" stroke-width="1.5" marker-end="url(#ar)"/>
+  <text x="580" y="120" text-anchor="middle" font-size="9">WiFi · MQTT/TLS</text>
+  <rect x="615" y="90" width="125" height="90" rx="6" fill="#f4f6f9" stroke="#8a94a6"/>
+  <text x="677" y="118" text-anchor="middle" font-weight="600">Arduino Cloud</text>
+  <text x="677" y="136" text-anchor="middle" font-size="9.5">iot.arduino.cc:8885</text>
+  <text x="677" y="152" text-anchor="middle" font-size="9.5">Thing：43 个属性</text>
+  <text x="677" y="168" text-anchor="middle" font-size="9.5">看板 · OTA</text>
+  <text x="20" y="318" font-size="9" fill="#556">实线箭头 = 批 0 已有的数据流（PLC→快照→云）；虚线 = 批 1 起启用的反向路径（云→命令队列→PLC）。</text>
+</svg>
+<div class="cap">图 2-1 系统全貌。以太网是 PLC 链路，WiFi 是云链路；两条链路各归一个线程。</div>
+</div>
+<p>板子上跑着三个我们自己的线程，外加 mbed/Arduino 核心自己的线程（网络栈、USB 等）。板子和 PLC 之间走以太网口静态 IP，不设网关；默认路由在 WiFi 上，所以云流量走 WiFi。批 0 是<b>只读骨架</b>：数据只从 PLC 流向云，云到 PLC 的命令路径（虚线）已经建好队列但还没有人往里写。</p>
+</div>
+
+<!-- ================= 3 ================= -->
+<div class="page">
+<h2>3. 线程与所有权</h2>
+<table>
+<tr><th style="width:15%">线程</th><th style="width:13%">优先级 / 栈</th><th style="width:22%">周期</th><th>独占的对象</th><th>绝不碰的东西</th></tr>
+<tr><td><span class="tag m">主线程</span><br><span class="mono">setup()/loop()</span></td><td>Normal / 默认</td><td><code>loop()</code> 自由运转，通常每趟几毫秒；诊断块每 30 s，串口心跳每 3 s</td><td>全部 43 个 <code>Cloud*</code> 属性；<code>ArduinoCloud</code>；WiFi；web 配置服务器（以太网口 80 端口）；串口配置；面板 LED；主线程栈水位</td><td><code>eip</code> 的任何方法</td></tr>
+<tr><td><span class="tag p">PLC 线程</span><br><span class="mono">plcThreadBody()</span></td><td>Normal / 16384 B</td><td>固定 2000 ms 一拍（<code>SAMPLE_INTERVAL_MS</code>），超时的一拍结束后立刻开始下一拍</td><td><code>eip</code>（EtherNet/IP 客户端及其 5 个 700 B 静态缓冲）；PLC 探针；本地工作快照 <code>w</code>；命令队列的消费端</td><td>任何 <code>Cloud*</code>、<code>ArduinoCloud</code>、WiFi</td></tr>
+<tr><td><span class="tag w">喂狗线程</span><br><span class="mono">wdFeederLoop()</span></td><td>High / 2048 B</td><td>每 2000 ms 醒一次</td><td>硬件看门狗的 <code>kick()</code>；stall 统计</td><td>一切 I/O。它只读两个 32 位时间戳</td></tr>
+</table>
+<h3>为什么 PLC 线程要 16 KB 栈</h3>
+<p>旧固件里 <code>pollSensors()</code> 跑在主线程的默认栈上，加上 CIP 报文构造和 TLS，栈水位曾逼近告警。拆出来之后 PLC 线程只跑 CIP，16 KB 是保守取值；EtherNet/IP 客户端的收发缓冲是函数级 <code>static</code>，放在 .bss 不占栈；快照 <code>w</code> 约 220 字节在线程栈上。实际水位由 <code>StackWatch</code> 测量并放进快照的 <code>plcStackFree</code> 字段（批 0 只在串口显示）。</p>
+<h3>调试期的归属断言</h3>
+<pre>SHARED_ASSERT_ON_PLC();   // pollSensorsInto() 第一行：不在 PLC 线程上就打印并自旋
+SHARED_ASSERT_ON_MAIN();  // cloudSideAssign() 第一行：不在主线程上就打印并自旋</pre>
+<p><code>g_plcThreadId</code> 在线程体第一行记录，<code>g_mainThreadId</code> 在 <code>setup()</code> 里记录。<code>ENABLE_SERIAL_DEBUG=0</code> 时两个宏为空。违规后自旋，喂狗线程 60 秒后放手，硬件复位——在台架上是最响的失败，在现场也不会永久挂死。</p>
+</div>
+
+<!-- ================= 4 ================= -->
+<div class="page">
+<h2>4. 文件地图</h2>
+<table>
+<tr><th style="width:24%">文件</th><th class="c" style="width:7%">行</th><th style="width:10%">归属</th><th>职责</th></tr>
+<tr><td><span class="mono">opta-gateway-mt.ino</span></td><td class="c">541</td><td><span class="tag m">主</span></td><td>主线程文件。定义 <code>eip</code>（但不调用）、WiFi/KVStore 配置、web 配置页、WiFi 救援、OTA 回调、面板 LED、<code>setup()</code>、<code>loop()</code>。</td></tr>
+<tr><td><span class="mono">plc_thread.h</span></td><td class="c">163</td><td><span class="tag p">PLC</span></td><td>PLC 线程本体：重连门（探针 + 指数退避）、<code>pollSensorsInto()</code>、<code>drainCommands()</code>、发布、<code>plcThreadBegin()</code>。</td></tr>
+<tr><td><span class="mono">cloud_side.h</span></td><td class="c">62</td><td><span class="tag m">主</span></td><td>唯一从 PLC 数据写 <code>Cloud*</code> 的地方：<code>cloudSideConsume()</code> 取快照，28 个 <code>TAKE(槽, 属性)</code> 赋值，<code>lastError</code> 在此构造 <code>String</code>。</td></tr>
+<tr><td><span class="mono">shared.h</span></td><td class="c">175</td><td><span class="tag s">共享</span></td><td>两个线程唯一的接触面：<code>PlcSnapshot</code>、<code>CtrlState</code>、<code>Cmd</code> 队列、一把互斥锁、六个访问函数、归属断言。</td></tr>
+<tr><td><span class="mono">wd_feeder.h</span></td><td class="c">97</td><td><span class="tag w">喂狗</span></td><td>双心跳喂狗线程、<code>WD_AT_*</code> 位置码 0–13、stall 最大值与归因。</td></tr>
+<tr><td><span class="mono">stack_watch.h</span></td><td class="c">55</td><td>各线程</td><td>手工栈水位：在线程最浅点把栈下方刷成 <code>0x5A5A5A5A</code>，之后数还剩多少没被覆盖。struct，每线程一个实例。</td></tr>
+<tr><td><span class="mono">plc_tags.h</span></td><td class="c">160</td><td>只读表</td><td>28 个 PLC 标签名、6 个 DINT 的缩放/偏移、REAL/DINT 到规范槽位的映射，6 条 <code>static_assert</code>。</td></tr>
+<tr><td><span class="mono">thingProperties.h</span></td><td class="c">115</td><td><span class="tag m">主</span></td><td>43 个云属性的声明和 <code>addProperty</code> 注册（权限、策略、阈值）。名字与旧固件一致，用同一个 Thing。</td></tr>
+<tr><td><span class="mono">plc_probe.h</span></td><td class="c">82</td><td><span class="tag p">PLC</span></td><td>300 ms 的 TCP 敲门：44818 端口有人听才让 <code>eip.begin()</code> 去连。</td></tr>
+<tr><td><span class="mono">cloud_probe.h</span></td><td class="c">126</td><td><span class="tag m">主</span></td><td>500 ms 的 TCP 敲门 iot.arduino.cc:8885，加 5 s 节流；<code>cloudUpdateAllowed()</code> 决定这趟要不要进 <code>update()</code>。</td></tr>
+<tr><td><span class="mono">EtherNetIP.h / .cpp</span></td><td class="c">124 / 526</td><td><span class="tag p">PLC</span></td><td>自研 EtherNet/IP 显式报文客户端：会话注册、CIP 读写、12 标签一组的 MSP 批读，单次 I/O 超时 1500 ms。旧固件逐字拷贝。</td></tr>
+<tr><td><span class="mono">boot_reason.h</span></td><td class="c">313</td><td><span class="tag m">主</span></td><td>启动原因：读 <code>RCC-&gt;RSR</code>、KVStore 里的启动计数 <code>n=</code>。云端 <code>bootReason</code> 字串就来自这里。</td></tr>
+<tr><td><span class="mono">serial_config.h</span></td><td class="c">136</td><td><span class="tag m">主</span></td><td>串口改 WiFi 凭据的小协议（存进 KVStore）。</td></tr>
+<tr><td><span class="mono">config.h</span></td><td class="c">1109</td><td>配置</td><td>全部编译期常数。批 0 把 8 个功能开关强制为 0（阀、PLC 状态、水量、AI、热泵、自动吸附、USB 日志等）。</td></tr>
+<tr><td><span class="mono">tools/build.sh</span></td><td class="c">—</td><td>工具</td><td>唯一受支持的构建入口：从 git 生成 <code>version.h</code>（<code>FW_VERSION</code>），再调 <code>arduino-cli</code>。</td></tr>
+</table>
+<div class="box"><b>读代码的建议顺序。</b><span class="mono">shared.h</span>（合同）→ <span class="mono">plc_thread.h</span>（生产者）→ <span class="mono">cloud_side.h</span>（消费者）→ <span class="mono">.ino</span> 的 <code>setup()/loop()</code>（编排）→ <span class="mono">wd_feeder.h</span>（保险）。<span class="mono">config.h</span> 和两个探针按需查。</div>
+</div>
+
+<!-- ================= 5 ================= -->
+<div class="page">
+<h2>5. 共享面 shared.h：两个线程唯一的接触点</h2>
+<p>所有跨线程的东西都在这一个文件里：一个 PLC→主的快照、一个主→PLC 的连续控制块、一个主→PLC 的一次性命令队列、一把锁。设计文档的判据是：<b>以后的改动如果能不碰这个文件，说明线程边界画对了。</b></p>
+<h3>5.1 PlcSnapshot（PLC → 主，每拍一份）</h3>
+<table>
+<tr><th style="width:22%">字段</th><th style="width:16%">类型</th><th>含义</th></tr>
+<tr><td><code>seq</code></td><td>uint32</td><td>单调递增，每次发布 +1，<b>在锁内</b>递增，所以主线程不可能看到新序号配旧数据。</td></tr>
+<tr><td><code>stampMs</code></td><td>uint32</td><td>发布时的 <code>millis()</code>。主线程用它算快照年龄，超过 3 拍（6 s）判定 PLC 线程卡住。</td></tr>
+<tr><td><code>sensor[28]</code></td><td>float</td><td>28 个传感器值，槽序 = <code>SENSOR_TAGS</code> 顺序（见第 13 节）。</td></tr>
+<tr><td><code>ok[28]</code></td><td>bool</td><td>这一拍哪些槽读到了。主线程只赋值 <code>ok</code> 为真的槽，读失败的属性保留上一个真值而不是变成 0。</td></tr>
+<tr><td><code>fails</code></td><td>int32</td><td>本拍没读到的槽数。</td></tr>
+<tr><td><code>plcConnected</code></td><td>bool</td><td>EtherNet/IP 会话是否在。</td></tr>
+<tr><td><code>eipMs</code></td><td>int32</td><td>上一次 <code>eip.begin()</code> 尝试耗时（含探针）。</td></tr>
+<tr><td><code>lastCipStatus</code></td><td>uint16</td><td>最近一次 CIP 通用状态码。</td></tr>
+<tr><td><code>lastError[48]</code></td><td>char</td><td>"ok" / "read fail x3 (cip=0x5)" / "plc not listening (probe)"。<b>是 char[] 不是 String</b>。</td></tr>
+<tr><td><code>plcStackFree</code></td><td>uint32</td><td>PLC 线程栈的最小剩余（字节）。</td></tr>
+<tr><td><code>cmdDropped</code></td><td>uint32</td><td>因队列满而丢弃的命令累计数。</td></tr>
+</table>
+<p class="small">整个结构约 220 字节，<code>static_assert(sizeof &lt; 1024)</code>；<code>static_assert(is_trivially_copyable)</code> 保证没有 String/指针混进来。</p>
+<h3>5.2 CtrlState（主 → PLC，连续）与 Cmd 队列（主 → PLC，一次性）</h3>
+<div class="two"><div>
+<pre>struct CtrlState {
+  bool  controlEnabled;   // 批 1
+  float flowRate;         // 批 2
+  float flowBatch;        // 批 2
+};</pre></div><div>
+<pre>struct Cmd {
+  uint16_t tag;     // CmdTag 枚举，24 项
+  bool     isBool;
+  float    value;
+};
+rtos::Mail&lt;Cmd,16&gt; g_cmdQueue;</pre></div></div>
+<p>批 0 没有人写它们，但结构第一天就定型，后面批次不必再改这个文件。命令队列是 mbed 的 <code>Mail</code>，16 槽；投递用 <code>try_alloc</code>，满了返回 false 并把 <code>g_cmdDropped</code> +1；取用 <code>try_get</code>，空了立刻返回。<b>两端都不阻塞。</b></p>
+<h3>5.3 锁的规则</h3>
+<pre>sharedPublish(w):  stampMs=millis(); lock(); w.seq=published.seq+1; published=w; unlock();
+sharedTake(out,&amp;lastSeq): lock(); out=published; unlock(); 若 out.seq==lastSeq 返回 false</pre>
+<p>一把 <code>rtos::Mutex</code>（带优先级继承）守两个结构体。四个持锁函数的临界区都只有一行结构体拷贝，微秒级。两把锁只会多出一种死锁方式，所以只用一把。</p>
+</div>
+
+<!-- ================= 6 ================= -->
+<div class="page">
+<h2>6. PLC 线程：每 2 秒一拍</h2>
+<div class="fig">
+<svg viewBox="0 0 760 490" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif" font-size="10.5">
+  <defs><marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#2e8b57"/></marker></defs>
+  <g stroke="#2e8b57" stroke-width="1.4" fill="#e8f5ee">
+    <rect x="300" y="8" width="160" height="28" rx="14"/>
+    <rect x="300" y="56" width="160" height="30" rx="4"/>
+    <path d="M380,108 L480,138 L380,168 L280,138 Z"/>
+    <rect x="60" y="190" width="220" height="34" rx="4"/>
+    <path d="M170,243 L265,268 L170,293 L75,268 Z"/>
+    <rect x="30" y="325" width="130" height="34" rx="4"/>
+    <rect x="180" y="325" width="130" height="34" rx="4"/>
+    <rect x="480" y="190" width="220" height="34" rx="4"/>
+    <rect x="480" y="238" width="220" height="26" rx="4" fill="#fff"/>
+    <rect x="480" y="290" width="220" height="34" rx="4"/>
+    <rect x="280" y="400" width="200" height="34" rx="4"/>
+    <rect x="270" y="450" width="220" height="30" rx="15"/>
+  </g>
+  <g text-anchor="middle" fill="#123">
+    <text x="380" y="27">拍开始：tick0 = millis()</text>
+    <text x="380" y="76">wdBeatPlc()  ← 心跳</text>
+    <text x="380" y="142">eip.connected()?</text>
+    <text x="170" y="204">未连接：退避时间到了吗？</text>
+    <text x="170" y="218" font-size="8.5" fill="#556">5 s → 10 → 20 → 40 → 60 s</text>
+    <text x="170" y="272" font-size="10">plcProbe() 300 ms</text>
+    <text x="95" y="339">eip.begin()</text>
+    <text x="95" y="353" font-size="8.5" fill="#556">WD_AT_EIPCONN=5</text>
+    <text x="245" y="339">不连接</text>
+    <text x="245" y="353" font-size="8.5" fill="#556">lastError="plc not listening"</text>
+    <text x="590" y="204">已连接：pollSensorsInto(w)</text>
+    <text x="590" y="218" font-size="8.5" fill="#556">WD_AT_SENSORS=6</text>
+    <text x="590" y="255" font-size="8.5">22 REAL 两组 MSP + 6 DINT 单读 → w.sensor[] / ok[]</text>
+    <text x="590" y="304">drainCommands()</text>
+    <text x="590" y="318" font-size="8.5" fill="#556">WD_AT_CIPWRITE=10 · 批 0 只打日志</text>
+    <text x="380" y="414">采栈水位；w.cmdDropped</text>
+    <text x="380" y="428" font-size="8.5" fill="#556">s_plcStack.sample()</text>
+    <text x="380" y="469">sharedPublish(w) → 睡满 2000 ms</text>
+  </g>
+  <text x="498" y="469" font-size="8.5" fill="#556">WD_AT_PLCPUBLISH=13</text>
+  <text x="272" y="256" font-size="8.5" fill="#556">WD_AT_PLCPROBE=11</text>
+  <g stroke="#2e8b57" stroke-width="1.4" fill="none" marker-end="url(#a2)">
+    <line x1="380" y1="36" x2="380" y2="56"/>
+    <line x1="380" y1="86" x2="380" y2="108"/>
+    <path d="M280,138 L170,138 L170,190"/>
+    <path d="M480,138 L590,138 L590,190"/>
+    <line x1="170" y1="224" x2="170" y2="243"/>
+    <path d="M75,268 L95,268 L95,325"/>
+    <path d="M265,268 L245,268 L245,325"/>
+    <line x1="590" y1="224" x2="590" y2="238"/>
+    <line x1="590" y1="264" x2="590" y2="290"/>
+    <line x1="380" y1="385" x2="380" y2="400"/>
+    <line x1="380" y1="434" x2="380" y2="450"/>
+  </g>
+  <g stroke="#2e8b57" stroke-width="1.4" fill="none">
+    <path d="M95,359 L95,385 L590,385 L590,324"/>
+    <line x1="245" y1="359" x2="245" y2="385"/>
+  </g>
+  <text x="268" y="130" font-size="9" fill="#2e8b57">否</text>
+  <text x="486" y="130" font-size="9" fill="#2e8b57">是</text>
+  <text x="80" y="300" font-size="9" fill="#2e8b57" text-anchor="middle">通</text>
+  <text x="262" y="300" font-size="9" fill="#2e8b57" text-anchor="middle">不通</text>
+</svg>
+<div class="cap">图 6-1 PLC 线程的一拍。左分支是未连接时的重连门，右分支是已连接时的扫描。两条分支都以发布收尾，所以<b>即使 PLC 掉线，快照也每 2 秒更新一次</b>（带 plcConnected=false）。</div>
+</div>
+<h3>扫描细节 pollSensorsInto(w)</h3>
+<ul>
+<li>先把 28 个 <code>ok[]</code> 清零。</li>
+<li>22 个 REAL 用 Multiple Service Packet 批读：<code>EIP_MAX_MSP_TAGS=12</code>，分两组两次往返。结果按 <code>REAL_SLOT[k]</code> 散射进规范槽位。</li>
+<li>6 个 DINT（4 个热泵压力原始计数、2 个 DS 温湿度）单个读，<code>raw × DINT_SCALE + DINT_OFFSET</code> 后散射进各自槽位。</li>
+<li>统计 <code>fails</code>；失败集合变化时才在串口列出失败标签名（不是每拍都刷屏）。</li>
+<li>全部 28 个都失败 → <code>eip.end()</code>，置 <code>plcConnected=false</code>，下一拍进入重连门。</li>
+</ul>
+<h3>重连门</h3>
+<p>退避从 5 s 起，每次失败翻倍，上限 60 s，成功后复位。<b>先探针再 begin</b>：探针是原生 <code>TCPSocket</code>，<code>set_timeout(300)</code> 在 <code>connect()</code> 之前调用，netsocket 层对 connect 生效，所以 PLC 断电时一次尝试只花 0.3 s，而不是旧固件的 27.7 s。</p>
+</div>
+
+<!-- ================= 7 ================= -->
+<div class="page">
+<h2>7. 主线程：setup() 与 loop()</h2>
+<h3>7.1 setup() 的顺序（每一步的位置都有理由）</h3>
+<table>
+<tr><th class="c" style="width:5%">#</th><th style="width:38%">调用</th><th>为什么在这里</th></tr>
+<tr><td class="c">1</td><td><code>bootReasonCapture()</code></td><td>必须第一句：读 <code>RCC-&gt;RSR</code>，越晚越可能被别的初始化清掉。</td></tr>
+<tr><td class="c">2</td><td><code>Serial.begin(115200)</code>，最多等 1.5 s</td><td>有上限，不会因为没插 USB 而卡死。</td></tr>
+<tr><td class="c">3</td><td><code>g_mainThreadId = osThreadGetId()</code></td><td>让 <code>SHARED_ASSERT_ON_MAIN</code> 有参照。</td></tr>
+<tr><td class="c">4</td><td>以太网静态 IP + <code>cfgServer.begin()</code></td><td>PLC 链路和 web 配置页都在以太网口；静态 IP、无网关，默认路由留给 WiFi。</td></tr>
+<tr><td class="c">5</td><td><code>loadWifiConfig()</code> → <code>WiFiConnectionHandler</code>（超时表 5 s）→ <code>initProperties()</code> → <code>fwVersion/bootReason</code> 赋值 → <code>ArduinoCloud.begin()</code> → OTA 回调</td><td>云侧全部在主线程初始化；<code>begin()</code> 不阻塞，真正的连接在 <code>update()</code> 里进行。</td></tr>
+<tr><td class="c">6</td><td>三个面板 LED <code>pinMode</code></td><td>—</td></tr>
+<tr><td class="c">7</td><td><code>plcThreadBegin()</code></td><td>启动 PLC 线程。<b>setup() 里不做 <code>eip.begin()</code></b>：第一次连接由 PLC 线程在自己的栈上、经探针完成。</td></tr>
+<tr><td class="c">8</td><td><code>wdFeederBegin()</code></td><td>在 PLC 线程之后启动；喂狗循环开头把两个心跳都置为当前时间，不会误判。</td></tr>
+<tr><td class="c">9</td><td><code>s_mainStack.begin()</code></td><td>最后一句：在最浅栈点刷水位图案。</td></tr>
+</table>
+<h3>7.2 loop() 的一趟</h3>
+<div class="fig">
+<svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif" font-size="10">
+  <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#2b5fa8"/></marker></defs>
+  <g fill="#e9f0fa" stroke="#2b5fa8" stroke-width="1.3">
+    <rect x="10" y="30" width="95" height="44" rx="4"/><rect x="125" y="30" width="105" height="44" rx="4"/>
+    <rect x="250" y="30" width="120" height="44" rx="4"/><rect x="390" y="30" width="120" height="44" rx="4"/>
+    <rect x="530" y="30" width="105" height="44" rx="4"/><rect x="655" y="30" width="95" height="44" rx="4"/>
+  </g>
+  <g text-anchor="middle" fill="#123" font-size="9">
+    <text x="57" y="48">wdBeatMain()</text><text x="57" y="62" font-size="7.5">心跳</text>
+    <text x="177" y="48">web / 串口配置</text><text x="177" y="62" font-size="7.5">WD_AT_WEB=1</text>
+    <text x="310" y="48">cloudSideConsume()</text><text x="310" y="62" font-size="7.5">seq 变了 → 赋 Cloud*</text>
+    <text x="450" y="48">cloudUpdateAllowed()</text><text x="450" y="62" font-size="7.5">WD_AT_CLOUDPROBE=12</text>
+    <text x="582" y="48">update()</text><text x="582" y="62" font-size="7.5">放行才进 · WD_AT_CLOUD=2</text>
+    <text x="702" y="48">心跳 3 s</text><text x="702" y="62" font-size="7.5">诊断 30 s</text>
+  </g>
+  <g stroke="#2b5fa8" stroke-width="1.3" fill="none" marker-end="url(#a3)">
+    <line x1="105" y1="52" x2="125" y2="52"/><line x1="230" y1="52" x2="250" y2="52"/><line x1="370" y1="52" x2="390" y2="52"/>
+    <line x1="510" y1="52" x2="530" y2="52"/><line x1="635" y1="52" x2="655" y2="52"/>
+    <path d="M750,52 L755,52 L755,100 L10,100 L10,74" stroke-dasharray="4 3"/>
+  </g>
+  <text x="380" y="118" text-anchor="middle" font-size="9" fill="#556">一趟通常几毫秒（云端 loopMs=0～1）。plcStalled = 快照年龄 &gt; 6 s；为真时每 10 s 写一次 lastError="plc thread stalled Ns" 并点 FAULT 灯。</text>
+  <text x="380" y="135" text-anchor="middle" font-size="9" fill="#556">诊断块每 30 s：heapUsed/heapFree（mallinfo）、uptimeS、stackFree（主线程）、loopStallMs/stallWhere（来自喂狗线程）、wifiRssi。</text>
+</svg>
+<div class="cap">图 7-1 主线程 loop() 一趟。没有任何一步等待 PLC 线程。</div>
+</div>
+<p><code>cloudSideConsume()</code> 每趟都调，但只有 <code>seq</code> 变化时才做 28 次赋值——所以云属性每 2 秒更新一次，与 PLC 拍同步，而不是每趟 loop 都刷。</p>
+</div>
+
+<!-- ================= 8 ================= -->
+<div class="page">
+<h2>8. 快照的一生：从 PLC 标签到云端属性</h2>
+<div class="fig">
+<svg viewBox="0 0 760 345" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif" font-size="10">
+  <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#445"/></marker></defs>
+  <g stroke="#99a" stroke-dasharray="4 3">
+    <line x1="80" y1="40" x2="80" y2="335"/><line x1="280" y1="40" x2="280" y2="335"/>
+    <line x1="460" y1="40" x2="460" y2="335"/><line x1="660" y1="40" x2="660" y2="335"/>
+  </g>
+  <g text-anchor="middle" font-weight="600">
+    <rect x="30" y="12" width="100" height="24" rx="4" fill="#f4f6f9" stroke="#8a94a6"/><text x="80" y="29">PLC</text>
+    <rect x="215" y="12" width="130" height="24" rx="4" fill="#e8f5ee" stroke="#2e8b57"/><text x="280" y="29" fill="#1f6b3f">PLC 线程</text>
+    <rect x="410" y="12" width="100" height="24" rx="4" fill="#efe9f7" stroke="#7a5cb3"/><text x="460" y="29" fill="#4d3a80">shared.h</text>
+    <rect x="600" y="12" width="120" height="24" rx="4" fill="#e9f0fa" stroke="#2b5fa8"/><text x="660" y="29" fill="#1f3f6e">主线程 → 云</text>
+  </g>
+  <g stroke="#445" stroke-width="1.3" fill="none" marker-end="url(#a4)">
+    <line x1="280" y1="60" x2="80" y2="60"/><line x1="80" y1="78" x2="280" y2="78"/>
+    <line x1="280" y1="98" x2="80" y2="98"/><line x1="80" y1="116" x2="280" y2="116"/>
+    <line x1="280" y1="140" x2="80" y2="140"/><line x1="80" y1="158" x2="280" y2="158"/>
+    <line x1="280" y1="208" x2="460" y2="208"/>
+    <line x1="660" y1="235" x2="460" y2="235"/><line x1="460" y1="253" x2="660" y2="253"/>
+    <line x1="660" y1="312" x2="740" y2="312"/>
+  </g>
+  <g font-size="9" fill="#123">
+    <text x="180" y="56" text-anchor="middle">MSP 读 12 个 REAL</text>
+    <text x="180" y="74" text-anchor="middle">12 个值</text>
+    <text x="180" y="94" text-anchor="middle">MSP 读 10 个 REAL</text>
+    <text x="180" y="112" text-anchor="middle">10 个值</text>
+    <text x="180" y="136" text-anchor="middle">单读 DINT ×6（缩放）</text>
+    <text x="180" y="154" text-anchor="middle">6 个原始计数</text>
+    <text x="370" y="203" text-anchor="middle">sharedPublish(w)：锁内 seq+1、拷 220 B</text>
+    <text x="560" y="230" text-anchor="middle">sharedTake(s_local, lastSeq)：锁内拷 220 B</text>
+    <text x="560" y="248" text-anchor="middle">seq 变了 → true</text>
+    <text x="700" y="307" text-anchor="middle">MQTT</text>
+  </g>
+  <rect x="220" y="168" width="120" height="16" rx="3" fill="#fff" stroke="#2e8b57"/><text x="280" y="180" text-anchor="middle" font-size="8.5">散射到 w.sensor[]/ok[]</text>
+  <rect x="595" y="262" width="130" height="30" rx="3" fill="#fff" stroke="#2b5fa8"/>
+  <text x="660" y="274" text-anchor="middle" font-size="8.5">TAKE(i, prop) ×28：ok[i] 才赋值</text>
+  <text x="660" y="286" text-anchor="middle" font-size="8.5">lastError = String(char[])</text>
+  <text x="80" y="332" text-anchor="middle" font-size="8.5" fill="#556">每 2 s 重复</text>
+  <text x="660" y="332" text-anchor="middle" font-size="8.5" fill="#556">ON_CHANGE / PUB_DELTA 决定是否真发</text>
+</svg>
+<div class="cap">图 8-1 一拍数据的旅程。两次加锁各只拷一个结构体；String 只在主线程、在赋值瞬间构造。</div>
+</div>
+<h3>槽位是合同</h3>
+<p><code>plc_tags.h</code> 的 <code>SENSOR_TAGS[]</code> 顺序定义了槽 0–27。PLC 线程按这个顺序写 <code>w.sensor[]</code>，<code>cloud_side.h</code> 的 28 个 <code>TAKE(i, 属性)</code> 按同一顺序读。两边都靠这一张表；表的长度有 <code>static_assert(N_SENSORS == 28)</code> 把守，一对一配对的正确性在代码审查时逐槽核过（见第 13 节）。</p>
+<h3>"读失败不归零"</h3>
+<p>旧固件读失败时属性会被写成 0，看板上出现假的归零尖峰。现在 <code>TAKE</code> 只在 <code>ok[i]</code> 为真时赋值，失败的槽保持云端上一个真值，同时 <code>fails</code>、<code>lastError</code> 说明发生了什么。</p>
+<h3>云端只在变化时发</h3>
+<p>28 个传感器都注册为 <code>READ, ON_CHANGE</code>；压力、热泵压力和液位另加 <code>PUB_DELTA</code> 阈值抑制抖动。所以每 2 秒赋值 28 次并不等于每 2 秒发 28 条 MQTT，库只发变了的。</p>
+</div>
+
+<!-- ================= 9 ================= -->
+<div class="page">
+<h2>9. 喂狗线程：看两条心跳，怪较旧的那条</h2>
+<pre>每 2000 ms：
+  sinceMain = now - s_mainBeatMs       // 主线程每趟 loop 开头打一次
+  sincePlc  = now - s_plcBeatMs        // PLC 线程每拍开头打一次
+  since     = max(sinceMain, sincePlc)
+  若 since 创新高：s_stallMaxMs = since；s_stallWhere = (sinceMain ≥ sincePlc) ? s_whereMain : s_wherePlc
+  若硬件看门狗还没被武装：continue     // 它由 update() 内的云状态机武装，setup 末尾还没跑
+  若 since &lt; 60000：kick()             // 否则放手，s_wdRefusals++，硬件在 32.76 s 内复位</pre>
+<p><b>为什么取 max：</b>只要有一个线程卡死，系统就已经不健康，喂狗线程不能替它遮掩。<b>为什么 60 s 放手：</b>一个永远不回来的线程比一次重启更糟；60 s 给合法的长操作（PLC 半死时一拍最坏约 24–28 s，主线程 DNS 全灭时一趟最坏约 30 s）留了约两倍余量。</p>
+<h3>位置码 WD_AT_*</h3>
+<p>每个线程在进入一段可能阻塞的代码前登记自己在哪。两个线程各有一个槽（<code>s_whereMain</code>/<code>s_wherePlc</code>），归因时取较旧心跳所属线程的槽。如果只用一个共享槽，健康线程会在每趟结束时把它覆盖成 NONE，卡死现场就丢了——这正是审查阶段改掉的一个缺陷。</p>
+<table>
+<tr><th class="c" style="width:8%">码</th><th style="width:22%">名字</th><th style="width:12%">线程</th><th>正在做什么</th></tr>
+<tr><td class="c">0</td><td>NONE</td><td>—</td><td>不在任何登记段</td></tr>
+<tr><td class="c">1</td><td>WEB</td><td><span class="tag m">主</span></td><td><code>handleConfigClient()</code> web 配置页</td></tr>
+<tr><td class="c">2</td><td>CLOUD</td><td><span class="tag m">主</span></td><td><code>ArduinoCloud.update()</code>。开机首次 TLS 连接约 6 s 就落在这里，所以云端 loopStallMs≈6000@2 是正常的</td></tr>
+<tr><td class="c">3</td><td>USB</td><td>—</td><td>USB 日志（批 6，当前编译掉）</td></tr>
+<tr><td class="c">4</td><td>PUSH</td><td><span class="tag m">主</span></td><td>Influx 自检（批 3）</td></tr>
+<tr><td class="c">5</td><td>EIPCONN</td><td><span class="tag p">PLC</span></td><td><code>eip.begin()</code> 建立会话</td></tr>
+<tr><td class="c">6</td><td>SENSORS</td><td><span class="tag p">PLC</span></td><td><code>pollSensorsInto()</code> 扫 28 标签</td></tr>
+<tr><td class="c">7 / 8 / 9</td><td>VALVES / PLCSTATE / HEATPUMP</td><td><span class="tag p">PLC</span></td><td>批 1 / 批 1 / 批 5</td></tr>
+<tr><td class="c">10</td><td>CIPWRITE</td><td><span class="tag p">PLC</span></td><td>排空命令队列、写 PLC</td></tr>
+<tr><td class="c">11</td><td>PLCPROBE</td><td><span class="tag p">PLC</span></td><td>300 ms 探针</td></tr>
+<tr><td class="c">12</td><td>CLOUDPROBE</td><td><span class="tag m">主</span></td><td>500 ms 云探针（含 DNS）</td></tr>
+<tr><td class="c">13</td><td>PLCPUBLISH</td><td><span class="tag p">PLC</span></td><td><code>sharedPublish()</code></td></tr>
+</table>
+<p class="small">码本身就说明了线程：1、2、4、12 只出现在主线程，5–11、13 只出现在 PLC 线程。云端属性 <code>stallWhere</code> 发布的就是这个码。</p>
+<div class="box warn"><b>已知局限。</b><code>loopStallMs</code> 只增不减：开机那次 6 s 的云连接会把它钉在 ~6000，之后一次 20 s 的停顿如果没超过历史最大值就看不见。批 1 计划改成滑动窗口。</div>
+</div>
+
+<!-- ================= 10 ================= -->
+<div class="page">
+<h2>10. 两个探针：先敲门，再进门</h2>
+<p>两处无界阻塞的共同病因是：Arduino 的 <code>Client</code> 在 <code>connect()</code> 期间是阻塞的，只在连接成功后才被设成非阻塞；对方不在时就跑满协议栈的 TCP 重传（约 28 s）。两个探针用同一个药方：用<b>原生 mbed <code>TCPSocket</code></b>，在 <code>connect()</code> 之前 <code>set_timeout()</code>，netsocket 层对 connect 生效，然后只开一下、关掉，什么都不发。</p>
+<div class="two">
+<div class="box"><b>PLC 探针 <span class="mono">plc_probe.h</span></b><br>
+目标 192.168.102.21:44818，超时 <b>300 ms</b>。<br>
+何时：PLC 线程重连门内、<code>eip.begin()</code> 之前。<br>
+不通 → 不连、写 <code>lastError="plc not listening (probe)"</code>、退避翻倍。<br>
+代价：PLC 断电时一次尝试 0.3 s，而不是 27.7 s。</div>
+<div class="box"><b>云探针 <span class="mono">cloud_probe.h</span></b><br>
+目标 iot.arduino.cc:8885（MQTT/TLS 端口），超时 <b>500 ms</b>，DNS 结果缓存。<br>
+何时：主线程每趟 loop，<b>只在"WiFi 已连、云未连"这一个状态</b>才真敲；5 s 节流。<br>
+不通 → 这趟跳过 <code>update()</code>（反正只会卡住）。</div>
+</div>
+<h3>云探针的门为什么这么窄</h3>
+<pre>cloudUpdateAllowed(wifiUp, cloudUp, now):
+  cloudUp   → true    // 已连：update() 负责发布、keepalive、OTA，绝不能跳
+  !wifiUp   → true    // 无线断：update() 是唯一会重新关联射频的东西，跳了就永远离线
+  否则（WiFi 通、云断）：每 5 s 敲一次 8885；敲通才 true</pre>
+<p>只有"WiFi 通、云断"这一个状态的下一次 <code>update()</code> 是那个无界的 TLS connect；其他状态的 <code>update()</code> 都很快或者必须跑。DNS 失败按"不通"处理：DNS 死通常意味着互联网断了，这时进 <code>update()</code> 只会白卡。</p>
+<h3>实测归因（改造前的过夜数据）</h3>
+<p>六次重启里有两次 WiFi 信号稳定在 -70 dBm 长达 8 分钟，说明掉的不是无线链路而是到 iot.arduino.cc 的上游。所以探针测的是"broker 端口能不能到"，而不是 RSSI 这个有三分之一时间指错方向的代理。</p>
+<div class="box warn"><b>已知局限。</b>DNS 失败时 <code>s_brokerResolved</code> 保持 false，每次敲门都重跑 <code>gethostbyname</code>（mbed 默认 5 s × 3 次），互联网断开期间主线程每 5 s 可能阻塞 15–30 s——仍在 60 s 放手线之内，但批 1 应缓存否定结果。</div>
+</div>
+
+<!-- ================= 11 ================= -->
+<div class="page">
+<h2>11. 启动序列</h2>
+<p>接上串口（115200）时应按这个顺序看到下面的行；每一行对应 setup() 的一步或一个线程的起点。</p>
+<pre>[BOOT] rsr=0x... n=36 ...                       boot_reason.h：复位原因 + KVStore 启动计数
+[MT] opta-gateway-mt starting fw=a43c01d        版本来自 build.sh 生成的 version.h
+[ETH] instance=1 configured=192.168.102.107  actual=192.168.102.107
+[CFG] web config page listening on port 80
+[PLC] thread launched, stack 16384 B            setup() 第 7 步
+[WD] feeder started, kick every 2000 ms, give up after 60000 ms, watching main+plc
+[PLC] thread started                            PLC 线程体第一行
+[EIP] session OK                                探针通 → begin() 成功（PLC 关机时是 "plc not listening (probe)"）
+[HB] wifi=up cloud=up plc=1 seqAge=1830 cloudMs=1 eipMs=3 stall=5999@2 mainStk=26256 plcStk=... t1=44.8 lvl=20.2</pre>
+<table>
+<tr><th style="width:18%">[HB] 字段</th><th>含义与健康值</th></tr>
+<tr><td><code>seqAge</code></td><td>当前快照年龄（ms）。PLC 线程每 2 s 发布一次，所以健康时 &lt; 2500，<b>不论 PLC 是否连着</b>。</td></tr>
+<tr><td><code>cloudMs</code></td><td>这趟 <code>update()</code> 花的时间。稳态 0–1 ms。</td></tr>
+<tr><td><code>eipMs</code></td><td>最近一次连接尝试耗时。PLC 在线约 3 ms；PLC 断电约 300 ms（探针拒绝）。</td></tr>
+<tr><td><code>stall@where</code></td><td>历史最大 stall 与位置码。开机 ~6000@2 正常。</td></tr>
+<tr><td><code>mainStk / plcStk</code></td><td>两个线程栈的最小剩余。都应 &gt; 4000。</td></tr>
+</table>
+<h3>云端的对应表现（2026-09-04 12:00 首次上板实测）</h3>
+<table>
+<tr><th>属性</th><th>值</th><th>说明</th></tr>
+<tr><td><code>fwVersion</code></td><td>a43c01d</td><td>与 git 提交一致，无 -dirty 后缀</td></tr>
+<tr><td><code>bootReason</code></td><td>none rsr=0x00000000 n=36</td><td>OTA 重启本身让 n 从 35 变 36；此后不动即健康</td></tr>
+<tr><td><code>plcConnected / eipMs / lastError</code></td><td>True / 3 / ok</td><td>PLC 会话 3 ms 建立</td></tr>
+<tr><td><code>t1HotTank</code> 等 28 项</td><td>2–7 s 前更新</td><td>PLC 线程每 2 s 一拍</td></tr>
+<tr><td><code>loopStallMs / stallWhere</code></td><td>5999 / 2</td><td>开机 TLS 连接</td></tr>
+<tr><td><code>stackFree</code></td><td>26256</td><td>主线程栈最小剩余</td></tr>
+</table>
+</div>
+
+<!-- ================= 12 ================= -->
+<div class="page">
+<h2>12. 四种故障与固件的反应</h2>
+<table>
+<tr><th style="width:17%">故障</th><th style="width:28%">PLC 线程</th><th style="width:28%">主线程 / 云端</th><th>看板与串口上的样子</th></tr>
+<tr><td><b>PLC 断电或网线拔掉</b></td><td>下一拍 28 个全失败 → <code>eip.end()</code>；之后每拍走重连门：探针 0.3 s 拒绝，退避 5→10→20→40→60 s。<b>每拍仍发布</b>（plcConnected=false）。</td><td>完全不受影响：<code>update()</code> 照常，诊断照常。<code>cloudSideConsume</code> 每 2 s 仍收到新 seq，传感器属性因 ok[] 全假而保持旧值。</td><td>plcConnected=False，lastError="plc not listening (probe)"，eipMs≈300，uptimeS 持续更新；串口 seqAge&lt;2500、cloud=up。PLC 回来后 60 s 内 "session OK"。</td></tr>
+<tr><td><b>WiFi 或上游断</b></td><td>完全不受影响：继续每 2 s 扫描发布。</td><td>WiFi 断：门放行，<code>update()</code> 快速返回并重新关联。WiFi 通、云断：每 5 s 敲一次 8885，不通就跳过 update()，主线程不会卡进 TLS connect。</td><td>看板全部属性停更（板子发不出去）；串口 wifi=down 或 cloud=down 但 plc=1、t1/lvl 继续变化、stall 不爬升。恢复后云端出现新值。</td></tr>
+<tr><td><b>PLC 半死</b>（端口开着、不回 CIP）</td><td>探针通 → begin() 或读超时：每次 I/O 1500 ms 超时，一拍最坏约 24–28 s（两组 MSP + 6 单读），仍在 60 s 内。</td><td>不受影响。快照年龄可能超过 6 s → plcStalled 为真，lastError="plc thread stalled Ns"，FAULT 灯亮。</td><td>lastError 报 stalled；stall@6 或 @5 增大。这是终审点名<b>最值得用串口验证</b>的场景：<code>readExact</code> 每收一字节就重置计时，慢速滴答的对端理论上可拖长一拍。</td></tr>
+<tr><td><b>某线程真的卡死</b>（bug、死锁）</td><td colspan="2">喂狗线程看到该线程心跳超过 60 s → 停止踢狗 → 硬件在 32.76 s 内复位。<code>s_stallWhere</code> 记下卡死线程当时的位置码。</td><td>重启后 bootReason 的 n 加一，云端 loopStallMs/stallWhere 在复位前的最后一次诊断里指向卡死段（如果那次诊断赶上发出去）。</td></tr>
+</table>
+<h3>面板 LED（批 0 语义）</h3>
+<table>
+<tr><th style="width:15%">LED</th><th>亮的条件</th></tr>
+<tr><td>LED_D1（PLC）</td><td><code>plcConnected</code> 为真</td></tr>
+<tr><td>LED_D2（云）</td><td><code>ArduinoCloud.connected()</code></td></tr>
+<tr><td>LED_D3（故障）</td><td>PLC 未连 <b>或</b> 快照年龄 &gt; 6 s。阀/温压故障灯要到批 1 才回来。</td></tr>
+</table>
+<p class="small">注意：<code>panelLeds()</code> 目前在串口心跳块里（<code>ENABLE_SERIAL_DEBUG</code> 为 1 时才刷），批 1 会把它移出来。</p>
+</div>
+
+<!-- ================= 13 ================= -->
+<div class="page">
+<h2>13. 云端属性清单</h2>
+<h3>13.1 传感器 28 项（槽序 = PLC 线程写、主线程读的合同）</h3>
+<table>
+<tr><th class="c" style="width:6%">槽</th><th style="width:23%">PLC 标签</th><th style="width:19%">云属性</th><th style="width:19%">类型</th><th style="width:11%">读法</th><th>发布策略</th></tr>
+<tr><td class="c">0–11</td><td>Temp_1 … Temp_12</td><td>t1HotTank … t12HeatPumpIn</td><td>CloudTemperatureSensor</td><td>REAL MSP</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">12</td><td>Vaisala_Conden_Temp</td><td>vtVaisalaTemp</td><td>CloudTemperatureSensor</td><td>REAL MSP</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">13–17</td><td>Press_1 … Press_5</td><td>p1TopChamber, p2BotChamber, p3ChamberRedun, p4Booster, p5Collector</td><td>CloudFloat</td><td>REAL MSP</td><td>ON_CHANGE + PUB_DELTA</td></tr>
+<tr><td class="c">18</td><td>Vaisala_Conden_WVP</td><td>p6VaisalaWvp</td><td>CloudFloat</td><td>REAL MSP</td><td>ON_CHANGE + PUB_DELTA</td></tr>
+<tr><td class="c">19–22</td><td>Raw_Module_1/2_Pressure_Grey/White</td><td>hp1HotInlet, hp1ColdInlet, hp2HotInlet, hp2ColdInlet</td><td>CloudFloat</td><td>DINT 单读</td><td>ON_CHANGE + PUB_DELTA</td></tr>
+<tr><td class="c">23</td><td>Atmosphere_Temp</td><td>atmTemp</td><td>CloudTemperatureSensor</td><td>REAL MSP</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">24</td><td>Atmosphere_Humidity</td><td>atmRh</td><td>CloudRelativeHumidity</td><td>REAL MSP</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">25</td><td>Atmosphere_Temp_02</td><td>atmTempDs</td><td>CloudTemperatureSensor</td><td>DINT 单读</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">26</td><td>Atmosphere_Humidity_02</td><td>atmRhDs</td><td>CloudRelativeHumidity</td><td>DINT 单读</td><td>ON_CHANGE</td></tr>
+<tr><td class="c">27</td><td>Collection_Tank_Level</td><td>tankLevel</td><td>CloudFloat</td><td>REAL MSP</td><td>ON_CHANGE + PUB_DELTA</td></tr>
+</table>
+<h3>13.2 诊断 15 项（全部 READ）</h3>
+<table>
+<tr><th style="width:18%">属性</th><th style="width:14%">来源</th><th style="width:20%">策略</th><th>含义</th></tr>
+<tr><td>plcConnected</td><td>快照</td><td>ON_CHANGE</td><td>EtherNet/IP 会话在不在</td></tr>
+<tr><td>eipMs</td><td>快照</td><td>ON_CHANGE</td><td>最近一次连接尝试耗时</td></tr>
+<tr><td>lastError</td><td>快照 → String</td><td>ON_CHANGE</td><td>"ok" / 读失败 / 探针拒绝 / PLC 线程 stalled</td></tr>
+<tr><td>loopMs</td><td>主线程</td><td>每 5 s</td><td>一趟 loop 的时长</td></tr>
+<tr><td>cloudMs</td><td>主线程</td><td>ON_CHANGE</td><td>一次 update() 的时长</td></tr>
+<tr><td>fwVersion / bootReason</td><td>setup()</td><td>ON_CHANGE</td><td>固件哈希；复位原因 + 启动计数 n=</td></tr>
+<tr><td>stackFree</td><td>主线程 StackWatch</td><td>ON_CHANGE</td><td>主线程栈最小剩余</td></tr>
+<tr><td>loopStallMs / stallWhere</td><td>喂狗线程</td><td>ON_CHANGE</td><td>历史最大 stall 与位置码</td></tr>
+<tr><td>wifiRssi / heapUsed / heapFree / uptimeS</td><td>主线程诊断块</td><td>每 30 s</td><td>信号；mallinfo 堆；开机秒数</td></tr>
+<tr><td>otaPending</td><td>OTA 回调</td><td>ON_CHANGE</td><td>批 0 已注册但从不置真</td></tr>
+</table>
+<p class="small">属性名与旧固件完全一致，所以看板和 InfluxDB 转发无需改动；旧固件另外 112 个属性在批 0 期间停更并保留最后的值（见第 14 节）。</p>
+</div>
+
+<!-- ================= 14 ================= -->
+<div class="page">
+<h2>14. 与旧固件的对比、批次路线图</h2>
+<table>
+<tr><th style="width:22%">方面</th><th style="width:39%">旧固件 opta-plc-gateway-ip2</th><th>opta-gateway-mt 批 0</th></tr>
+<tr><td>结构</td><td>单文件 2587 行 + 若干头文件，单线程 loop()</td><td>按职责拆成 12 个文件，三个线程，一个共享面</td></tr>
+<tr><td>阻塞的传播</td><td>PLC 或云任一阻塞都会拖住另一个并触发看门狗</td><td>各自阻塞只卡自己；喂狗线程分别看两条心跳</td></tr>
+<tr><td>读失败的表现</td><td>属性写成 0</td><td>保留上一个真值，fails/lastError 说明原因</td></tr>
+<tr><td>云属性</td><td>155 个（含 16 个可写）</td><td>43 个，全部只读</td></tr>
+<tr><td>固件体积 / 全局变量</td><td>501,508 B / 154,208 B</td><td>462,076 B / 133,896 B</td></tr>
+<tr><td>String 跨线程</td><td>不适用（单线程）</td><td>编译期禁止；快照只带 char[]</td></tr>
+<tr><td>批 0 不包含</td><td colspan="2">阀/泵/位置反馈、PLC 状态字、吸附/脱附计时、水量核算、AI 推理、热泵 BACnet、控制回调（start/stop/reset/purge、时间设定、热泵设定）、Influx 直推、USB 日志。这些属性在看板上停在 12:00 之前的最后值。</td></tr>
+</table>
+<h3>批次路线图（设计文档第 7 节）</h3>
+<table>
+<tr><th class="c" style="width:8%">批</th><th style="width:30%">内容</th><th>说明</th></tr>
+<tr><td class="c"><b>0</b></td><td>骨架：28 传感器 + 15 诊断</td><td><b>已上板</b>（a43c01d）。证明两个隔离承诺；过夜考核基线 n=36。</td></tr>
+<tr><td class="c">1</td><td>阀/泵状态、PLC 状态字、16 个 onXxxChange 回调经命令队列写 PLC</td><td>启用 <code>CtrlState.controlEnabled</code>、<code>drainCommands()</code> 真正写 PLC、OTA 门恢复 <code>!controlEnabled</code>。</td></tr>
+<tr><td class="c">2</td><td>水量核算、自动吸附</td><td>flowRate/flowBatch 经 CtrlState 下发。</td></tr>
+<tr><td class="c">3</td><td>Influx 直推</td><td>主线程，WD_AT_PUSH。</td></tr>
+<tr><td class="c">4</td><td>AI 推理</td><td>消费快照，主线程或第三线程视 CPU 而定。</td></tr>
+<tr><td class="c">5</td><td>热泵</td><td>接口改 Modbus RTU 后再定（BACnet MS/TP 那一路不再投入）。</td></tr>
+<tr><td class="c">6</td><td>USB 日志</td><td>WD_AT_USB；注意 shared.h 多翻译单元问题。</td></tr>
+</table>
+<p>每个批次的原则相同：新功能要么落在 PLC 线程（只碰 eip、只写快照/读 CtrlState），要么落在主线程（只碰 Cloud*、只读快照/写 CtrlState 和命令队列）。<b>如果一个功能非得同时碰 eip 和 Cloud*，那它必须被拆成两半，中间经过 shared.h。</b></p>
+</div>
+
+<!-- ================= 15 ================= -->
+<div class="page">
+<h2>15. 批 1 之前要知道的事</h2>
+<p>全分支终审（2026-09-04）认定两个隔离承诺在代码上成立、无需在过夜前修改；下面是它留给批 1 的清单，完整版在仓库 <span class="mono">docs/batch0-final-review.md</span>。</p>
+<ol>
+<li><code>panelLeds()</code> 在 <code>#if ENABLE_SERIAL_DEBUG</code> 里——生产构建关掉串口后面板灯会全灭。移出来。</li>
+<li><code>shared.h</code> 的全局对象是头文件里的 <code>static</code>：单翻译单元正确，第二个 <code>.cpp</code> 包含它会静默得到第二把锁。加一个非 static 守卫符号让它变成链接错误。</li>
+<li>PLC 线程一拍只在开头喂一次狗；批 1 加阀和状态字读取后一拍可能逼近 60 s。在每组 MSP、每个 DINT 读之后补 <code>wdBeatPlc()</code>。</li>
+<li>云探针 DNS 失败不缓存，互联网断开时每 5 s 可能阻塞 15–30 s。缓存否定结果。</li>
+<li><code>plcStalled</code> 在 PLC 线程尚未发布过任何快照时（stampMs=0）会误判；加 <code>seq != 0</code> 前置条件。</li>
+<li>重连分支不清 <code>ok[]</code>，它保留上一拍的真值；批 2 水量核算不能把它当"本拍读到"。</li>
+<li>归属断言只在 <code>pollSensorsInto</code> 一处；放进重连分支和 <code>drainCommands()</code>，或直接放进 EtherNet/IP 的 <code>sendRRData()</code>。</li>
+<li><code>LOG</code> 两个线程都用：没接控制台时 <code>USBSerial::write</code> 立刻返回，零风险；接着控制台时是交叉乱码不是死锁；控制台停止排空时两线程可能一起卡住 60 s 后复位。给 LOG 加锁或让 PLC 线程不写串口。</li>
+<li><code>loopStallMs</code> 只增不减。改滑动窗口。</li>
+<li>没有编译期检查保证 28 个 <code>TAKE</code> 恰好覆盖 0–27 各一次。加 constexpr 位掩码断言。</li>
+<li><code>tools/build.sh</code> 没有告警门。</li>
+<li><code>cloud_side.h</code> 头注释"seven String properties"应改为一个。</li>
+</ol>
+<div class="box warn"><b>批 1 上线前的一个陷阱。</b>ArduinoIoTCloud 会在首次同步时把云端存着的可写属性值当 onChange 交下来。批 0 期间看板上的按钮仍能按、云端仍会存值、板子不消费；批 1 一连上云，那些存着的值（比如一次误按的 start）会瞬间发到 PLC。批 1 之前先把云端这些值归位。</div>
+<div class="box"><b>回滚路径。</b>旧固件没有归档二进制。回滚 = 在 <span class="mono">opta-plc-gateway-ip2</span> 里跑它的 <span class="mono">tools/build.sh</span> 再 OTA，或到板子跟前 DFU。</div>
+</div>
+
+<!-- ================= 16 ================= -->
+<div class="page">
+<h2>16. 术语表</h2>
+<table>
+<tr><th style="width:24%">术语</th><th>解释</th></tr>
+<tr><td>EtherNet/IP、CIP</td><td>Allen-Bradley PLC 的以太网工业协议；CIP 是其上的通用工业协议，本固件用显式报文按标签名读写。端口 44818。</td></tr>
+<tr><td>MSP</td><td>Multiple Service Packet，一条 CIP 报文里打包多个读请求。本固件一组最多 12 个标签。</td></tr>
+<tr><td>REAL / DINT</td><td>CIP 数据类型：32 位浮点 / 32 位有符号整数。IP2 上 6 个点以 DINT 原始计数给出，固件乘缩放加偏移。</td></tr>
+<tr><td>快照 PlcSnapshot</td><td>PLC 线程一拍的全部结果，纯数据结构，约 220 字节，加锁整体拷贝。</td></tr>
+<tr><td>seq</td><td>快照序号。主线程凭它判断"有没有新的一拍"。</td></tr>
+<tr><td>拍 tick</td><td>PLC 线程的一个周期，2000 ms。</td></tr>
+<tr><td>心跳 beat</td><td>线程告诉喂狗线程"我还活着"的时间戳。</td></tr>
+<tr><td>stall</td><td>某线程自上次心跳以来的时间；喂狗线程取两线程中的较大值。</td></tr>
+<tr><td>WD_AT_*</td><td>位置码 0–13，线程在进入可能阻塞的段之前登记。</td></tr>
+<tr><td>探针 probe</td><td>带超时的原生 TCP 开关一次，只看端口有没有人听，不传数据。</td></tr>
+<tr><td>Mail</td><td>mbed RTOS 的定长消息队列（内存池 + 队列）。命令队列用它，16 槽。</td></tr>
+<tr><td>trivially copyable</td><td>C++ 类型特征：可以 memcpy 而不破坏语义（无 String、无指针、无虚函数）。快照的编译期门槛。</td></tr>
+<tr><td>ON_CHANGE / PUB_DELTA</td><td>ArduinoIoTCloud 的属性更新策略：值变了才发 / 变化超过阈值才发。</td></tr>
+<tr><td>n=</td><td>KVStore 里的启动计数，出现在 bootReason 字串里。不变 = 没重启。</td></tr>
+<tr><td>OTA</td><td>经 Arduino Cloud 无线刷固件。回调返回 true 才允许应用。</td></tr>
+<tr><td>StackWatch</td><td>手工栈水位：刷图案、数没被覆盖的字。每线程一个实例。</td></tr>
+<tr><td>KVStore</td><td>Arduino 的键值持久存储（QSPI flash）。存 WiFi 凭据、启动计数。</td></tr>
+</table>
+<p class="small" style="margin-top:14pt">相关文档：设计 <span class="mono">docs/superpowers/specs/2026-09-04-opta-gateway-mt-design.md</span>；批 0 计划 <span class="mono">docs/superpowers/plans/2026-09-04-opta-gateway-mt-batch0.md</span>；终审 <span class="mono">opta-gateway-mt/docs/batch0-final-review.md</span>；仓库 <span class="mono">opta-gateway-mt/README.md</span>。</p>
+</div>
+
+</body></html>
