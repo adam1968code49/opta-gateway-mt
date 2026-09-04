@@ -58,5 +58,7 @@ inline uint32_t cloudSideSnapshotAgeMs() {
 
 inline uint32_t cloudSidePlcStackFree() { return s_local.plcStackFree; }
 inline uint32_t cloudSideCmdDropped()   { return s_local.cmdDropped; }
+inline bool     cloudSidePlcConnected() { return s_local.plcConnected; }
+inline bool     cloudSideHasSnapshot()  { return s_local.seq != 0; }   // false until the PLC thread published once
 
 #endif // CLOUD_SIDE_H

@@ -30,6 +30,7 @@
 #include "shared.h"
 #include "plc_thread.h"
 #include "cloud_side.h"
+#include "cloud_ctrl.h"
 static_assert(N_VALVE == 36 && N_STATE == 27 && N_ACTION == 15, "batch 1 sweep tables");
 static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
 static_assert(sizeof(PlcSnapshot) < 700, "snapshot grew past 700 B");
@@ -477,6 +478,7 @@ void loop() {
   // ---- take the PLC snapshot, assign Cloud* once per PLC tick -------------
   static uint32_t lastSeq = 0;
   cloudSideConsume(lastSeq);
+  ctrlPoll();
   bool plcStalled = cloudSideSnapshotAgeMs() > 3 * SAMPLE_INTERVAL_MS;
   if (plcStalled) {
     static unsigned long lastWarn = 0;

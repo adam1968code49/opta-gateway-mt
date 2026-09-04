@@ -1,11 +1,12 @@
 #pragma once
 // =====================================================================
-//  Batch 0 property set. Declarations and registrations are taken from
-//  opta-plc-gateway-ip2/thingProperties.h with everything not yet migrated
-//  removed: no READWRITE property, no onXxxChange prototype, no valve /
-//  panel / water / AI / heat-pump / USB property. Those return with their
-//  batches. Names are unchanged so the same Thing and dashboard keep
-//  working; properties this build does not register simply stop updating.
+//  Batch 1 property set: the 43 of batch 0 plus valves / pumps /
+//  positions, fault flags, heat-pump St_* status bits, PLC state words,
+//  cycle timers, and the seven READWRITE controls with their callbacks.
+//  Declarations and registrations are verbatim from
+//  opta-plc-gateway-ip2/thingProperties.h so the same Thing and dashboard
+//  keep working. Still absent (later batches): water accounting writes,
+//  AI, heat-pump control and BACnet status, USB.
 // =====================================================================
 #include "config.h"
 #include <ArduinoIoTCloud.h>
@@ -42,6 +43,71 @@ CloudTemperatureSensor atmTempDs;
 CloudRelativeHumidity  atmRhDs;
 CloudFloat tankLevel;
 
+// ---- valves / pumps / positions, in VALVE_TAGS slot order 0..21 ---------
+CloudBool   valveS1;          // pneumatic, discrete
+CloudBool   valveS5;
+CloudBool   valveS6;          // top chamber -> turbo
+CloudBool   valveS7;          // bottom chamber -> turbo
+CloudBool   valveS10;
+CloudBool   valveV1A;         // water, discrete: top chamber inlet
+CloudBool   valveV1B;         //                  bottom chamber inlet
+CloudBool   valveV2A1;        //                  chamber outlet -> hot hx
+CloudBool   valveV2A2;
+CloudBool   valveV2B;
+CloudBool   pumpScroll;       // Edwards scroll (roughing) pump
+CloudBool   pumpCond;         // Lefoo condensate pump
+CloudBool   pumpHotWater;     // Grundfos
+CloudBool   pumpColdWater;    // AMT
+CloudBool   boosterVfdRun;    // booster VFD run command
+CloudFloat  posS2;            // proportional valve positions (0/45/50)
+CloudFloat  posS3;
+CloudFloat  posS4;            // collection chamber vent
+CloudFloat  posS8;
+CloudFloat  posS9;
+CloudFloat  posV10;           // top chamber vent
+CloudFloat  posV11;           // bottom chamber vent
+
+// ---- water totals read back from the PLC (slots 22, 23) -----------------
+CloudFloat  hmiWaterTotal;          // RO: hourly odometer the HMI shows
+CloudFloat  cumulativeWaterVolume;  // RO: lifetime total as stored in the PLC
+
+// ---- PLC fault flags (slots 24..26) --------------------------------------
+CloudBool   pressError;             // RO: Press_Error from the PLC
+CloudBool   tempError;              // RO: Temp_Error from the PLC
+CloudBool   genError;               // RO: Gen_Error from the PLC
+
+// ---- heat pump's own status over BACnet (slots 27..35) -------------------
+CloudBool   stStage1;               // compressor stage 1 running
+CloudBool   stStage2;               // compressor stage 2 running
+CloudBool   stAuxHeat;              // auxiliary electric heat on
+CloudBool   stIndoorCirc;           // indoor circulator running
+CloudBool   stIndoorFlow;           // indoor flow proved
+CloudBool   stOutdoorFlow;          // outdoor flow proved
+CloudBool   stLockout;              // unit locked out
+CloudBool   stPhaseFault;           // phase fault
+CloudBool   stBACnetControl;        // unit is under BACnet control
+
+// ---- valve-sweep health ---------------------------------------------------
+CloudInt    plcReadFails;           // RO: failing tags in the status sweep
+CloudString plcFailTag;             // RO: first failing tag, "ok" when none
+
+// ---- PLC state words and cycle timers -----------------------------------
+CloudInt    plcActionWord;    // bit N = Action_(N+1)
+CloudInt    plcStateWord;     // buttons / states / fans / door indicators
+CloudString plcStateText;
+CloudInt    adsorpElapsedS;    // Timer_3.ACC
+CloudInt    desorpElapsedT6S;  // Timer_6[3].ACC   (top chamber)
+CloudInt    desorpElapsedT11S; // Timer_11[3].ACC  (bottom chamber)
+
+// ---- controls (dashboard -> PLC), all behind controlEnabled --------------
+CloudBool  controlEnabled;     // master gate for ALL writes to the PLC
+CloudBool  systemRun;          // ON -> Start_Button = true (start auto cycle)
+CloudBool  stopButton;         // -> Stop_Button
+CloudBool  resetButton;        // -> Reset_Button
+CloudBool  purgeButton;        // -> Purge_Button
+CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
+CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 10-60
+
 // ---- diagnostics -------------------------------------------------------
 CloudBool   plcConnected;
 CloudInt    loopMs;         // main pass duration after update()
@@ -62,6 +128,15 @@ CloudBool   otaPending;
 #endif
 
 #define PUB_DELTA 0.1f
+
+// ---- callbacks, defined in cloud_ctrl.h (main thread) --------------------
+void onControlEnabledChange();
+void onSystemRunChange();
+void onStopButtonChange();
+void onResetButtonChange();
+void onPurgeButtonChange();
+void onAdsorpTimeMsChange();
+void onDesorpTimeMsChange();
 
 void initProperties() {
   // --- sensors ---
@@ -93,6 +168,67 @@ void initProperties() {
   ArduinoCloud.addProperty(atmRh,           READ, ON_CHANGE);
   ArduinoCloud.addProperty(atmRhDs,         READ, ON_CHANGE);
   ArduinoCloud.addProperty(tankLevel,       READ, ON_CHANGE, NULL, PUB_DELTA);
+
+  // --- valves / pumps / positions ---
+  ArduinoCloud.addProperty(valveS1,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveS5,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveS6,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveS7,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveS10,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveV1A,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveV1B,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveV2A1, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveV2A2, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(valveV2B,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(pumpScroll,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(pumpCond,      READ, ON_CHANGE);
+  ArduinoCloud.addProperty(pumpHotWater,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(pumpColdWater, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(boosterVfdRun, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(posS2,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posS3,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posS4,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posS8,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posS9,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posV10, READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(posV11, READ, ON_CHANGE, NULL, PUB_DELTA);
+
+  // --- water totals read back ---
+  ArduinoCloud.addProperty(cumulativeWaterVolume, READ, 30 * SECONDS);
+  ArduinoCloud.addProperty(hmiWaterTotal,         READ, ON_CHANGE, NULL, PUB_DELTA);
+
+  // --- fault flags, sweep health, heat-pump St_* ---
+  ArduinoCloud.addProperty(pressError,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(tempError,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(genError,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcReadFails, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcFailTag,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stStage1,        READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stStage2,        READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stAuxHeat,       READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stIndoorCirc,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stIndoorFlow,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stOutdoorFlow,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stLockout,       READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stPhaseFault,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(stBACnetControl, READ, ON_CHANGE);
+
+  // --- PLC state words and timers ---
+  ArduinoCloud.addProperty(adsorpElapsedS,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(desorpElapsedT6S,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(desorpElapsedT11S, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcActionWord,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcStateWord,      READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcStateText,      READ, ON_CHANGE);
+
+  // --- controls (dashboard -> PLC), all behind controlEnabled ---
+  ArduinoCloud.addProperty(controlEnabled, READWRITE, ON_CHANGE, onControlEnabledChange);
+  ArduinoCloud.addProperty(systemRun,      READWRITE, ON_CHANGE, onSystemRunChange);
+  ArduinoCloud.addProperty(stopButton,     READWRITE, ON_CHANGE, onStopButtonChange);
+  ArduinoCloud.addProperty(resetButton,    READWRITE, ON_CHANGE, onResetButtonChange);
+  ArduinoCloud.addProperty(purgeButton,    READWRITE, ON_CHANGE, onPurgeButtonChange);
+  ArduinoCloud.addProperty(adsorpTimeMs,   READWRITE, ON_CHANGE, onAdsorpTimeMsChange);
+  ArduinoCloud.addProperty(desorpTimeMs,   READWRITE, ON_CHANGE, onDesorpTimeMsChange);
 
   // --- diagnostics ---
   ArduinoCloud.addProperty(plcConnected, READ, ON_CHANGE);
