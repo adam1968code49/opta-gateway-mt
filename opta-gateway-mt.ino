@@ -19,6 +19,7 @@ EthernetClient plcTransport;
 IPAddress plcIp(PLC_IP_OCTET_0, PLC_IP_OCTET_1, PLC_IP_OCTET_2, PLC_IP_OCTET_3);
 EtherNetIPClient eip(plcTransport, plcIp, PLC_ENIP_PORT);
 #include "plc_thread.h"
+#include "cloud_side.h"
 static StackWatch swMain;
 static_assert(sizeof(StackWatch) <= 16, "StackWatch is three words; keep it a value type");
 void setup() {}
