@@ -13,3 +13,10 @@ OTA cannot tolerate.
 
 Batch 0 (this repository's first milestone): PLC thread reads the 28 sensor
 tags into a snapshot; main publishes them. Nothing else is migrated yet.
+
+## Batch 0 verification log
+
+- 2026-09-04 12:00 PT first boot on IP2 via OTA, fw a43c01d: both threads up, 28 sensors
+  publishing every 2 s, main stackFree=26256, PLC session in 3 ms, boot-connect stall
+  5999 ms @2 (cloud, expected). plcStk not recorded: board not on a serial console.
+  Boot counter n=35 -> 36 (the OTA reboot). Soak baseline n=36.
