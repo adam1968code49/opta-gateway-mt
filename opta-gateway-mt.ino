@@ -11,5 +11,9 @@
 #include "plc_tags.h"
 #include "shared.h"
 #include "thingProperties.h"
+#include "stack_watch.h"
+#include "wd_feeder.h"
+static StackWatch swMain;
+static_assert(sizeof(StackWatch) <= 16, "StackWatch is three words; keep it a value type");
 void setup() {}
 void loop() {}
