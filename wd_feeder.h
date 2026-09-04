@@ -40,7 +40,8 @@
 #define WD_AT_CLOUDPROBE 12   // cloudProbeOnce()              main
 #define WD_AT_PLCPUBLISH 13   // sharedPublish()               plc
 
-static volatile uint8_t  s_where       = WD_AT_NONE;
+static volatile uint8_t  s_whereMain   = WD_AT_NONE;   // written by main only
+static volatile uint8_t  s_wherePlc    = WD_AT_NONE;   // written by plc only
 static volatile uint8_t  s_stallWhere  = WD_AT_NONE;
 static volatile uint32_t s_mainBeatMs  = 0;
 static volatile uint32_t s_plcBeatMs   = 0;
@@ -48,7 +49,8 @@ static volatile uint32_t s_stallMaxMs  = 0;
 static volatile uint32_t s_wdRefusals  = 0;
 static volatile bool     s_wdSeen      = false;
 
-inline void     wdWhere(uint8_t w)  { s_where = w; }
+inline void     wdWhereMain(uint8_t w) { s_whereMain = w; }
+inline void     wdWherePlc(uint8_t w)  { s_wherePlc  = w; }
 inline void     wdBeatMain()        { s_mainBeatMs = millis(); }
 inline void     wdBeatPlc()         { s_plcBeatMs  = millis(); }
 inline uint32_t wdStallMax()        { return s_stallMaxMs; }
@@ -68,7 +70,9 @@ static void wdFeederLoop() {
     uint32_t since = (sinceMain > sincePlc) ? sinceMain : sincePlc;
     if (since > s_stallMaxMs) {
       s_stallMaxMs = since;
-      s_stallWhere = s_where;
+      //  Blame the thread whose beat is older. One shared slot would
+      //  let the healthy thread overwrite the wedged one's code with NONE.
+      s_stallWhere = (sinceMain >= sincePlc) ? s_whereMain : s_wherePlc;
     }
     //  Checked every pass, not at startup: the watchdog is armed by the
     //  cloud state machine inside update(), so at the end of setup() it
