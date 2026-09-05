@@ -112,6 +112,57 @@ CloudBool   hmiWriteOk;             // RO: last hourly HMI update succeeded
 CloudInt    hmiWriteCount;          // RO: hourly HMI writes performed
 CloudInt    plcTotalRestores;       // RO: lifetime-total restores performed
 
+// ---------------- Heat pump: PLC staging status (read-only) --------------
+CloudTemperatureSensor hpLoopTemp;    // HP_LoopTemp_PV, from HP_In.Indoor_OUT
+CloudFloat hpStage1ActivT;            // computed stage-1 turn-on temperature
+CloudFloat hpStage2ActivT;            // computed stage-2 turn-on temperature
+CloudBool  hpStage1Call;              // stage 1 demand
+CloudBool  hpStage2Call;              // stage 2 demand
+CloudBool  hpStage1Sat;               // stage 1 reached setpoint
+CloudBool  hpStage2Sat;               // stage 2 reached setpoint
+CloudBool  hpY1Cmd;                   // stage 1 command driving the output
+CloudBool  hpY2Cmd;                   // stage 2 command driving the output
+CloudBool  hpReverseCmd;              // reversing valve command
+CloudBool  hpCoolRequest;             // 0 = heating, 1 = cooling
+CloudBool  hpTempValid;               // loop-temp sanity check passed
+CloudBool  hpEnableSt;                // HP_Enable readback (see hpEnable RW)
+CloudBool  hpManualOvrSt;             // HP_Manual_Override readback
+// ---------------- Heat pump: unit status via HP_In (read-only) -----------
+CloudTemperatureSensor hpDischTemp;   // compressor discharge temperature
+CloudFloat hpSuctionPress;            // LPS1_Suction
+CloudFloat hpDischPress;              // HPS1_Discharge
+CloudTemperatureSensor hpEvapTemp;    // evaporator
+CloudTemperatureSensor hpCondTemp;    // condenser
+CloudTemperatureSensor hpSuctionLineT;// suction line
+CloudFloat hpSuperheat;               // Superheat1
+CloudFloat hpEevPosition;             // EEV1_Position
+CloudFloat hpCompCurrent;             // Comp1_Current
+CloudTemperatureSensor hpOutdoorIn;   // outdoor loop in
+CloudTemperatureSensor hpOutdoorOut;  // outdoor loop out
+CloudTemperatureSensor hpIndoorIn;    // indoor loop in
+CloudInt   hpOperationMode;           // Operation_Mode
+CloudInt   hpLimitsWord;
+CloudInt   hpPermAlarms1;
+CloudInt   hpPermAlarms2;
+CloudInt   hpBoardFaults;
+CloudInt   hpSensorFaults;
+CloudBool  hpDataStale;               // HP_In frozen for HP_STALE_TIMEOUT_MS
+CloudInt   hpDataAgeS;
+// ---------------- Heat pump: setpoints, READ-ONLY read-back in batch 5 ----
+//  Edited in Studio 5000. Registered READ on purpose: a dashboard slider
+//  moves nothing and snaps back on the next 6 s read-back.
+CloudFloat hpHtgSp1;
+CloudFloat hpHtgSp2;
+CloudFloat hpHtgDelta1;
+CloudFloat hpHtgDelta2;
+CloudFloat hpClgSp1;
+CloudFloat hpClgSp2;
+CloudFloat hpClgDelta1;
+CloudFloat hpClgDelta2;
+// ---------------- Heat pump: the two switches (dashboard -> PLC) ---------
+CloudBool  hpEnable;                  // -> HP_Enable
+CloudBool  hpModeCool;                // -> HP_Mode_CoolRequest (0 heat, 1 cool)
+
 // ---- controls (dashboard -> PLC), all behind controlEnabled --------------
 CloudBool  controlEnabled;     // master gate for ALL writes to the PLC
 CloudBool  systemRun;          // ON -> Start_Button = true (start auto cycle)
@@ -151,6 +202,8 @@ void onPurgeButtonChange();
 void onAdsorpTimeMsChange();
 void onDesorpTimeMsChange();
 void onFlowResetTotalChange();
+void onHpEnableChange();
+void onHpModeCoolChange();
 
 void initProperties() {
   // --- sensors ---
@@ -247,6 +300,55 @@ void initProperties() {
   ArduinoCloud.addProperty(hmiWriteOk,         READ, ON_CHANGE);
   ArduinoCloud.addProperty(hmiWriteCount,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcTotalRestores,   READ, ON_CHANGE);
+
+  // --- heat pump: PLC staging status ---
+  ArduinoCloud.addProperty(hpLoopTemp,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpStage1ActivT, READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpStage2ActivT, READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpStage1Call,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpStage2Call,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpStage1Sat,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpStage2Sat,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpY1Cmd,        READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpY2Cmd,        READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpReverseCmd,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpCoolRequest,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpTempValid,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpEnableSt,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpManualOvrSt,  READ, ON_CHANGE);
+  // --- heat pump: unit status via HP_In ---
+  ArduinoCloud.addProperty(hpDischTemp,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpSuctionPress, READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpDischPress,   READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpEvapTemp,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpCondTemp,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpSuctionLineT, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpSuperheat,    READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpEevPosition,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpCompCurrent,  READ, ON_CHANGE, NULL, PUB_DELTA);
+  ArduinoCloud.addProperty(hpOutdoorIn,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpOutdoorOut,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpIndoorIn,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpOperationMode, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpLimitsWord,   READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpPermAlarms1,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpPermAlarms2,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpBoardFaults,  READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpSensorFaults, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpDataStale,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpDataAgeS,     READ, 30 * SECONDS);
+  // --- heat pump: setpoints, read-only read-back ---
+  ArduinoCloud.addProperty(hpHtgSp1,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpHtgSp2,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpHtgDelta1, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpHtgDelta2, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpClgSp1,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpClgSp2,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpClgDelta1, READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hpClgDelta2, READ, ON_CHANGE);
+  // --- heat pump: the two switches, behind controlEnabled ---
+  ArduinoCloud.addProperty(hpEnable,   READWRITE, ON_CHANGE, onHpEnableChange);
+  ArduinoCloud.addProperty(hpModeCool, READWRITE, ON_CHANGE, onHpModeCoolChange);
 
   // --- controls (dashboard -> PLC), all behind controlEnabled ---
   ArduinoCloud.addProperty(controlEnabled, READWRITE, ON_CHANGE, onControlEnabledChange);

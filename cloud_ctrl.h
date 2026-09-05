@@ -142,6 +142,8 @@ void onSystemRunChange()   { ctrlBool(systemRun,   CMD_START_BUTTON, "systemRun"
 void onStopButtonChange()  { ctrlBool(stopButton,  CMD_STOP_BUTTON,  "stopButton");  }
 void onResetButtonChange() { ctrlBool(resetButton, CMD_RESET_BUTTON, "resetButton"); }
 void onPurgeButtonChange() { ctrlBool(purgeButton, CMD_PURGE_BUTTON, "purgeButton"); }
+void onHpEnableChange()    { ctrlBool(hpEnable,    CMD_HP_ENABLE,    "hpEnable");    }
+void onHpModeCoolChange()  { ctrlBool(hpModeCool,  CMD_HP_MODE_COOL, "hpModeCool");  }
 
 //  Setpoints arrive in MINUTES. Clamp here, reflect the clamped value to
 //  the cloud (a local assignment publishes without re-entering the

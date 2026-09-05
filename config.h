@@ -192,7 +192,7 @@
 //      operation mode, and the five fault/alarm words).
 //  Having both matters when troubleshooting: one says what the PLC ASKED
 //  for, the other says what the machine ACTUALLY did.
-#define HP_STATUS_ENABLE       0   // batch 5 -- off in batch 0
+#define HP_STATUS_ENABLE       1   // batch 5: on (record only)
 
 //  Status changes on the scale of minutes (minimum run/off timers are 5-10
 //  min), so polling it as fast as the sensors would just burn round-trips.
@@ -379,7 +379,7 @@
 //  HP_Stage*_Call / _Satisfied / _Activation and HP_Y1A/Y2A/Reverse_Cmd are
 //  OUTPUTS the logic rewrites every scan -- writing them from the cloud
 //  would be silently overwritten, so they stay read-only.
-#define HP_CONTROL_ENABLE      0   // batch 5 -- off in batch 0
+#define HP_CONTROL_ENABLE      1   // batch 5: on (record only)
 
 //  *** The two switches below are OFF on purpose. Turning either on hands a
 //  *** dashboard user something that can damage the compressor. Read the

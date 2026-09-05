@@ -21,6 +21,10 @@ static PlcSnapshot s_local = {};
 //  Valve sweep: BOOL tags arrive as 0.0/1.0 -- compare against 0.5.
 #define TAKE_VB(i, var) do { if (s_local.valveOk[i]) var = (s_local.valve[i] > 0.5f); } while (0)
 #define TAKE_VF(i, var) do { if (s_local.valveOk[i]) var = s_local.valve[i]; } while (0)
+//  Heat-pump sweep (slot order == HP_REAL_TAGS / HP_BOOL_TAGS).
+#define TAKE_HR(i, var) do { if (s_local.hpRealOk[i]) var = s_local.hpReal[i]; } while (0)
+#define TAKE_HI(i, var) do { if (s_local.hpRealOk[i]) var = (int)s_local.hpReal[i]; } while (0)
+#define TAKE_HB(i, var) do { if (s_local.hpBoolOk[i]) var = (s_local.hpBool[i] > 0.5f); } while (0)
 
 static void cloudSideAssign() {
   SHARED_ASSERT_ON_MAIN();
@@ -78,6 +82,26 @@ static void cloudSideAssign() {
     if (s_local.desorpPreMin > 0) desorpTimeMs = (int)s_local.desorpPreMin;
   }
 
+  // ---- heat pump: only when the 6 s sweep actually ran --------------------
+  static uint32_t lastHpSeq = 0;
+  if (s_local.hpSeq != lastHpSeq) {
+    lastHpSeq = s_local.hpSeq;
+    TAKE_HR( 0, hpLoopTemp);     TAKE_HR( 1, hpStage1ActivT); TAKE_HR( 2, hpStage2ActivT);
+    TAKE_HR( 3, hpDischTemp);    TAKE_HR( 4, hpSuctionPress); TAKE_HR( 5, hpDischPress);
+    TAKE_HR( 6, hpEvapTemp);     TAKE_HR( 7, hpCondTemp);     TAKE_HR( 8, hpSuctionLineT);
+    TAKE_HR( 9, hpSuperheat);    TAKE_HR(10, hpEevPosition);  TAKE_HR(11, hpCompCurrent);
+    TAKE_HR(12, hpOutdoorIn);    TAKE_HR(13, hpOutdoorOut);   TAKE_HR(14, hpIndoorIn);
+    TAKE_HI(15, hpOperationMode); TAKE_HI(16, hpLimitsWord);  TAKE_HI(17, hpPermAlarms1);
+    TAKE_HI(18, hpPermAlarms2);  TAKE_HI(19, hpBoardFaults);  TAKE_HI(20, hpSensorFaults);
+    TAKE_HR(21, hpHtgSp1);       TAKE_HR(22, hpHtgSp2);       TAKE_HR(23, hpHtgDelta1);  TAKE_HR(24, hpHtgDelta2);
+    TAKE_HR(25, hpClgSp1);       TAKE_HR(26, hpClgSp2);       TAKE_HR(27, hpClgDelta1);  TAKE_HR(28, hpClgDelta2);
+    TAKE_HB( 0, hpStage1Call);   TAKE_HB( 1, hpStage2Call);   TAKE_HB( 2, hpStage1Sat);  TAKE_HB( 3, hpStage2Sat);
+    TAKE_HB( 4, hpY1Cmd);        TAKE_HB( 5, hpY2Cmd);        TAKE_HB( 6, hpReverseCmd); TAKE_HB( 7, hpCoolRequest);
+    TAKE_HB( 8, hpTempValid);    TAKE_HB( 9, hpEnableSt);     TAKE_HB(10, hpManualOvrSt);
+    hpDataStale = s_local.hpDataStale;
+    hpDataAgeS  = (int)s_local.hpDataAgeS;
+  }
+
   // ---- water accounting (batch 2) -----------------------------------------
   flowRate           = s_local.flowRate;
   flowTotal          = s_local.flowTotal;
@@ -98,6 +122,9 @@ static void cloudSideAssign() {
 #undef TAKE
 #undef TAKE_VB
 #undef TAKE_VF
+#undef TAKE_HR
+#undef TAKE_HI
+#undef TAKE_HB
 
 //  Call every main pass. Cheap when nothing changed: one mutex-guarded
 //  struct copy and a compare.
