@@ -556,7 +556,7 @@
 //  from a single small pour.
 //
 //  FLOW_ENABLE 0 compiles the whole feature out (pin, ISR, cloud vars).
-#define FLOW_ENABLE          0   // batch 2 -- off in batch 0
+#define FLOW_ENABLE          1   // batch 2: pulse meter on (record only; flow_meter.h does not test it)
 #define FLOW_PIN             A0      // Opta terminal I1 (I1..I8 = A0..A7)
 #define FLOW_K_HZ_PER_LPM    38.0f   // CALIBRATED 2026-08-21 (2 L run); label's 23 was wrong
 

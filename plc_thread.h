@@ -25,6 +25,7 @@
 #include "shared.h"
 #include "stack_watch.h"
 #include "wd_feeder.h"
+#include "flow_meter.h"
 
 #define PLC_THREAD_STACK   16384
 #define STATE_EVERY_TICKS  3          // 6 s at SAMPLE_INTERVAL_MS 2000
@@ -307,6 +308,11 @@ static void plcThreadBody() {
   for (;;) {
     unsigned long tick0 = millis();
     wdBeatPlc();
+
+    //  The meter is wired to the Opta, not the PLC: measure every tick,
+    //  session up or down. Litres accumulate in the journal until the PLC
+    //  is back to take them.
+    flowTick(w);
 
     if (!eip.connected()) {
       w.plcConnected = false;

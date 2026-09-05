@@ -407,6 +407,12 @@ void setup() {
 
   g_mainThreadId = osThreadGetId();
 
+  //  Pulse counter armed before anything slow (cloud, PLC) so no pulses
+  //  are missed during the rest of boot. Counting only; the PLC thread
+  //  does the arithmetic.
+  flowInit();
+  LOGLN("[FLOW] pulse counter armed on I1 (FALLING)");
+
   // ---- pasted verbatim from opta-plc-gateway-ip2.ino, source lines 722-751,
   //  Ethernet bring-up + cfgServer.begin() -----------------------------------
   // ---- bring up the PLC network interface ----
