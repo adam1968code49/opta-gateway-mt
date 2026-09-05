@@ -24,3 +24,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   (plcReadFails=0, plcFailTag=ok, plcStateWord=0xF04), controls quiet-gated and all False.
   Boot counter n=38 -> 39 (OTA). Old firmware had restarted once overnight (n 37->38, ~2.4 h uptime).
   Soak baseline for batch 1: n=39. Observed: pressError=True on the PLC; desorp preset reads 9 min.
+- 2026-09-05 04:57 PT batch 2 on IP2 via OTA, fw 67d737e: 105 properties, flow meter and the whole
+  PLC water path on the PLC thread. plcFlowWriteOk=True (all eight product_*/trip_* tags answer),
+  boot tick refreshed the HMI (hmiWriteCount=1, ok). cumulative=display=8.04 L; trip=8.04 L because
+  trip_watervolume_mark is 0 until the first HMI trip reset. waterOwedL=0, plcTotalRestores=0.
+  Boot counter n=39 -> 40 (OTA). Soak baseline for batch 2: n=40.
