@@ -609,7 +609,7 @@
 //  remotely" and exists to protect operator writes; this is telemetry
 //  flowing INTO the PLC and must keep running unattended. Gating it
 //  would mean the PLC only sees flow while somebody is on the dashboard.
-#define FLOW_TO_PLC_ENABLE      0   // batch 2 -- off in batch 0
+#define FLOW_TO_PLC_ENABLE      1   // batch 2: water_plc.h on (record only)
 #define TAG_PROD_FLOWRATE       "product_flowrate"     // REAL, L/min
 #define TAG_PROD_WATERVOLUME    "product_watervolume"  // REAL, liters
 #define TAG_CUMUL_VOL_RESET     "cumulative_watervolume_reset"  // BOOL, HMI reset

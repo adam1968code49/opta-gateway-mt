@@ -58,6 +58,8 @@ static bool beatReadDint(const char* tag, int32_t& out) {
   return r;
 }
 
+#include "water_plc.h"
+
 // ---------------------------------------------------------------------
 //  Name failing tags only when the pattern changes, compared as an
 //  ARRAY (a bitmask broke silently at 36 entries in the old firmware).
@@ -203,6 +205,14 @@ static void pollPlcStateInto(PlcSnapshot& w) {
   if (beatReadDint(TAG_DESORP_ACC_T11, v)) w.desorpElapsedT11S = v / 1000;
   w.adsorpPreMin = (beatReadDint(TAG_ADSORP_TIME, v)   && v > 0) ? (int32_t)(v / MS_PER_MIN) : 0;
   w.desorpPreMin = (beatReadDint(TAG_DESORP_PRE_T6, v) && v > 0) ? (int32_t)(v / MS_PER_MIN) : 0;
+  w.desorpPreMinT11 = (beatReadDint(TAG_DESORP_PRE_T11, v) && v > 0) ? (int32_t)(v / MS_PER_MIN) : 0;
+  if (w.desorpPreMin > 0 && w.desorpPreMinT11 > 0 && w.desorpPreMin != w.desorpPreMinT11) {
+    static int32_t warnedT6 = -1, warnedT11 = -1;
+    if (warnedT6 != w.desorpPreMin || warnedT11 != w.desorpPreMinT11) {   // once per distinct pair
+      warnedT6 = w.desorpPreMin; warnedT11 = w.desorpPreMinT11;
+      LOG("[SEQ] desorp presets differ: T6="); LOG(w.desorpPreMin); LOG(" min, T11="); LOG(w.desorpPreMinT11); LOGLN(" min");
+    }
+  }
 
   w.stateSeq++;
 }
@@ -239,6 +249,8 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
       break;
     case CMD_ADSORP_TIME_MS: {
       int32_t mins = (int32_t)c.value;
+      if (mins < ADSORP_TIME_MIN_MIN) mins = ADSORP_TIME_MIN_MIN;   // clamp where the write happens too
+      if (mins > ADSORP_TIME_MAX_MIN) mins = ADSORP_TIME_MAX_MIN;
       ok = eip.writeDint(TAG_ADSORP_TIME, mins * MS_PER_MIN);
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
                ok ? "adsorp time set" : "write Timer_3.PRE failed");
@@ -246,6 +258,8 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
     }
     case CMD_DESORP_TIME_MS: {
       int32_t mins = (int32_t)c.value;
+      if (mins < DESORP_TIME_MIN_MIN) mins = DESORP_TIME_MIN_MIN;
+      if (mins > DESORP_TIME_MAX_MIN) mins = DESORP_TIME_MAX_MIN;
       int32_t ms   = mins * MS_PER_MIN;
       bool okT6  = eip.writeDint(TAG_DESORP_PRE_T6,  ms);
       wdBeatPlc();
@@ -258,6 +272,12 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
                           : "write Timer_11[3].PRE failed");
       break;
     }
+    case CMD_FLOW_RESET_TOTAL:
+      waterOnReset(w);
+      ok = true;
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s", "all water totals reset");
+      LOGLN("[FLOW] all water totals reset (gateway + PLC lifetime)");
+      break;
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;
@@ -353,6 +373,8 @@ static void plcThreadBody() {
       if (eip.connected()) {
         pollValvesInto(w);
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
+        wdWherePlc(WD_AT_CIPWRITE);
+        waterToPlc(w);                        // rate-limited inside to 5 s
       }
       wdWherePlc(WD_AT_CIPWRITE);
       drainCommands(w, true);
