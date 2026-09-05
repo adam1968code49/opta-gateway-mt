@@ -266,12 +266,22 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
   LOG(" -> "); LOG(ok ? "OK" : "FAIL"); LOG(" (cip=0x"); LOG(eip.lastCipStatus(), HEX); LOGLN(")");
 }
 
-static void drainCommands(PlcSnapshot& w) {
+//  allowWrites is false on the tick the PLC is (re)connecting: eip.begin()
+//  may have just succeeded a few lines above the call, which would make
+//  eip.connected() true and let a command queued while the PLC was away
+//  fire on the very tick it comes back. Commands posted while the PLC was
+//  offline are dropped and reported, never held for the reconnect.
+static void drainCommands(PlcSnapshot& w, bool allowWrites) {
   SHARED_ASSERT_ON_PLC();
   CtrlState ctrl;
   sharedCtrlRead(ctrl);
   Cmd c;
   while (sharedCmdTake(c)) {
+    if (!allowWrites) {
+      LOG("[CTRL] dropped, plc offline this tick: tag="); LOGLN(c.tag);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control: plc offline");
+      continue;
+    }
     if (!ctrl.controlEnabled) {
       LOG("[CTRL] dropped, control disabled: tag="); LOGLN(c.tag);
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control disabled");
@@ -327,10 +337,10 @@ static void plcThreadBody() {
           LOG("[EIP] reconnect failed, next in "); LOG(reconnectWait / 1000); LOGLN(" s");
         }
       }
-      //  A command posted while the PLC is away must not sit in the queue
-      //  and fire on reconnect. drainCommands reports "plc offline".
+      //  commands posted while the PLC was away are dropped and reported,
+      //  never held for the reconnect
       wdWherePlc(WD_AT_CIPWRITE);
-      drainCommands(w);
+      drainCommands(w, false);
     } else {
       wdWherePlc(WD_AT_SENSORS);
       pollSensorsInto(w);
@@ -339,7 +349,7 @@ static void plcThreadBody() {
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
       }
       wdWherePlc(WD_AT_CIPWRITE);
-      drainCommands(w);
+      drainCommands(w, true);
     }
     tickN++;
 

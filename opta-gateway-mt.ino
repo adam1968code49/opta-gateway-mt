@@ -450,6 +450,7 @@ void setup() {
   fwVersion  = FW_VERSION;
   bootReason = bootReasonStr();
   ArduinoCloud.begin(cloudConn);
+  ctrlBegin();
 #if OTA_ENABLE
   ArduinoCloud.onOTARequestCb(onOTARequestCallback);
 #endif
@@ -482,7 +483,6 @@ void loop() {
   // ---- take the PLC snapshot, assign Cloud* once per PLC tick -------------
   static uint32_t lastSeq = 0;
   cloudSideConsume(lastSeq);
-  ctrlPoll();
   //  Not stalled before the PLC thread has published once: stampMs is 0
   //  until then and would read as a minutes-old snapshot.
   bool plcStalled = cloudSideHasSnapshot() && cloudSideSnapshotAgeMs() > 3 * SAMPLE_INTERVAL_MS;

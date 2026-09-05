@@ -8,14 +8,27 @@
 //  one passes three gates and then posts a Cmd on the queue; the PLC
 //  thread writes it on its next tick (<= 2 s). Nothing here blocks.
 //
-//  First-sync quiet period. On connect the library delivers the values
-//  the cloud has stored for every READWRITE property as onChange, in no
-//  particular order. For CTRL_SYNC_QUIET_MS after the first connection
-//  every callback is ignored, BOOL controls are written back false so the
-//  dashboard shows the truth, and controlEnabled is accepted only when it
-//  flips false -> true AFTER the window. So after every boot the operator
-//  turns the master switch off and on again before anything reaches the
-//  PLC. A reconnect later does not restart the window.
+//  Sync-keyed quiet period. The library replays every READWRITE
+//  property's stored cloud value through its onUpdate callback (via the
+//  default onSync handler, CLOUD_WINS -> onForceCloudSync) while decoding
+//  the LastValuesUpdateCmdId message -- and only AFTER that decode
+//  finishes does it raise ArduinoIoTCloudEvent::SYNC
+//  (ArduinoIoTCloudTCP.cpp:545-549). So SYNC is the reliable "the replay
+//  just happened" signal: connected() is not, because MQTT can be up for
+//  up to AIOT_CONFIG_TIMEOUT_FOR_LASTVALUES_SYNC_ms * retries before the
+//  Thing finishes its RequestLastValues handshake and the replay lands.
+//
+//  For CTRL_SYNC_QUIET_MS after each SYNC every callback is ignored, BOOL
+//  controls are written back false so the dashboard shows the truth, and
+//  controlEnabled is accepted only when it flips false -> true AFTER the
+//  window. DISCONNECT (fired on MQTT loss, ArduinoIoTCloudTCP.cpp:460)
+//  clears the "have we synced" flag immediately, because a disconnect
+//  resets the Thing state machine to Init -> RequestLastValues
+//  (ResetCmdId in handle_Disconnect, ArduinoIoTCloudTCP.cpp:455-456), so
+//  the next reconnect replays the stored values again and must be treated
+//  exactly like the first boot. So after every boot AND after every
+//  reconnect the operator turns the master switch off and on again before
+//  anything reaches the PLC.
 // =====================================================================
 
 #include "thingProperties.h"
@@ -25,23 +38,43 @@
 
 #define CTRL_SYNC_QUIET_MS  15000
 
-static bool          s_cloudSeen      = false;
-static unsigned long s_cloudFirstUpMs = 0;
-static CtrlState     s_ctrlLocal      = {};
+static bool          s_syncSeen  = false;   // a SYNC event has been seen since the last (dis)connect
+static unsigned long s_syncMs    = 0;
+static CtrlState     s_ctrlLocal = {};
 
-//  Call once per main pass.
-inline void ctrlPoll() {
-  if (!s_cloudSeen && ArduinoCloud.connected()) {
-    s_cloudSeen = true;
-    s_cloudFirstUpMs = millis();
-    LOG("[CTRL] cloud up; ignoring stored control values for "); LOG(CTRL_SYNC_QUIET_MS / 1000); LOGLN(" s");
-  }
+//  Fired by the library AFTER it has replayed the cloud's stored values
+//  through the onChange callbacks. Everything replayed before this point
+//  was ignored (ctrlQuiet() was true); from here a 15 s window still
+//  applies, and control is disarmed so the operator has to flip the
+//  master switch on again.
+static void ctrlOnCloudSync() {
+  s_syncSeen = true;
+  s_syncMs   = millis();
+  s_ctrlLocal.controlEnabled = false;
+  sharedCtrlWrite(s_ctrlLocal);
+  if ((bool)controlEnabled) controlEnabled = false;   // show the truth on the dashboard
+  LOG("[CTRL] cloud SYNC: control disarmed; quiet for "); LOG(CTRL_SYNC_QUIET_MS / 1000); LOGLN(" s");
+}
+
+//  Fired when the cloud connection drops. The next connection will replay
+//  stored values again, so go back to ignoring until the next SYNC.
+static void ctrlOnCloudDisconnect() {
+  s_syncSeen = false;
+  s_ctrlLocal.controlEnabled = false;
+  sharedCtrlWrite(s_ctrlLocal);
+  LOGLN("[CTRL] cloud DISCONNECT: control disarmed; waiting for SYNC");
+}
+
+//  Call once in setup(), after ArduinoCloud.begin().
+inline void ctrlBegin() {
+  ArduinoCloud.addCallback(ArduinoIoTCloudEvent::SYNC,       ctrlOnCloudSync);
+  ArduinoCloud.addCallback(ArduinoIoTCloudEvent::DISCONNECT, ctrlOnCloudDisconnect);
 }
 
 inline bool ctrlControlEnabled() { return s_ctrlLocal.controlEnabled; }
 
 static bool ctrlQuiet() {
-  return !s_cloudSeen || (millis() - s_cloudFirstUpMs) < CTRL_SYNC_QUIET_MS;
+  return !s_syncSeen || (millis() - s_syncMs) < CTRL_SYNC_QUIET_MS;
 }
 
 //  Gates 1-3. Sets lastError on the refusals the operator should see.
@@ -93,6 +126,9 @@ void onControlEnabledChange() {
     if (on) controlEnabled = false;          // show the truth; operator flips it on again
     return;
   }
+  //  Quiet writes any replayed true back to false (ctrlOnCloudSync /
+  //  ctrlOnCloudDisconnect), so a true seen here, after the window, can
+  //  only be the operator flipping the dashboard switch.
   s_ctrlLocal.controlEnabled = on;
   sharedCtrlWrite(s_ctrlLocal);
   lastError = on ? "control enabled" : "control disabled";
