@@ -103,15 +103,26 @@ static bool tripHistoryClear() {
 }
 
 //  Cloud flowResetTotal (via the command queue) and the HMI reset flag both
-//  land here: clear the gateway's counters and journal, zero both PLC
-//  totals, and move the reference down with them or the next pass would
-//  "restore" the total we were asked to clear.
-static void waterOnReset(PlcSnapshot& w) {
+//  land here. Order: write the PLC first, clear our own books only if the
+//  PLC took it -- a rejected write must not leave the journal empty and the
+//  reference at zero while the PLC still holds the old total. The trip mark
+//  goes to zero with the total, or trip = wrap(0 - mark) would show the
+//  customer ~500,000 L at the next hourly write; the history belongs to the
+//  trip that just ended.
+static bool waterOnReset(PlcSnapshot& w) {
+  bool ok = beatWriteReal(TAG_CUMUL_WATERVOL,   0.0f);
+  ok     &= beatWriteReal(TAG_DISPLAY_WATERVOL, 0.0f);
+  ok     &= beatWriteReal(TAG_TRIP_MARK,        0.0f);
+  ok     &= beatWriteReal(TAG_TRIP_WATERVOL,    0.0f);
+  ok     &= tripHistoryClear();
+  if (!ok) {
+    LOG("[FLOW>PLC] reset write FAIL (cip=0x"); LOG(eip.lastCipStatus(), HEX); LOGLN(") -- books kept");
+    return false;
+  }
   flowReset(w);
-  beatWriteReal(TAG_CUMUL_WATERVOL,   0.0f);
-  beatWriteReal(TAG_DISPLAY_WATERVOL, 0.0f);
   s_lastGoodCum   = 0.0f;
   s_lastGoodValid = true;
+  return true;
 }
 
 //  Called every tick; rate-limits itself to FLOW_PLC_WRITE_MS (5 s), or
@@ -133,10 +144,13 @@ static void waterToPlc(PlcSnapshot& w) {
   //  HMI lifetime-total reset: reset first so the zero goes out this pass.
   bool rst = false;
   if (beatReadBool(TAG_CUMUL_VOL_RESET, rst) && rst) {
-    waterOnReset(w);
-    beatWriteBool(TAG_CUMUL_VOL_RESET, false);      // the acknowledgement
-    LOGLN("[FLOW>PLC] lifetime total reset requested -- both totals zeroed");
-    snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cumulative total reset (HMI)");
+    if (waterOnReset(w)) {
+      beatWriteBool(TAG_CUMUL_VOL_RESET, false);    // acknowledge only what happened
+      LOGLN("[FLOW>PLC] lifetime total reset requested -- totals, trip and history zeroed");
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cumulative total reset (HMI)");
+    } else {
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "HMI reset: PLC write failed, retry");
+    }
   }
 
   //  Trip tags back off while they have never answered.
@@ -259,12 +273,16 @@ static void waterToPlc(PlcSnapshot& w) {
     } else {
       LOG("[FLOW>PLC] write FAIL rate="); LOG(okRate ? "ok" : "no");
       LOG(" vol=");  LOG(okVol ? "ok" : "no");
-      LOG(" base="); LOG(baseSane ? "ok" : (okBase ? "INSANE" : "no"));
+      LOG(" base="); LOG(baseSane ? "ok" : (okBase ? "rejected/insane" : "no"));
       LOG(" (cip=0x"); LOG(eip.lastCipStatus(), HEX); LOGLN(")");
     }
   }
   w.waterOwedL = flowUncommitted();
-  if (okRate && okVol) everOk = true;         // backoff driven by the core writes only
+  //  Back off again after three straight failures of the core writes: a PLC
+  //  that worked once and then went half-dead must not cost 28 timeouts every 5 s.
+  static uint8_t coreFails = 0;
+  if (okRate && okVol) { everOk = true; coreFails = 0; }
+  else if (++coreFails >= 3) { everOk = false; coreFails = 0; }
   w.plcFlowWriteOk = all;
 }
 

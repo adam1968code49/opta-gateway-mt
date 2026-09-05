@@ -245,7 +245,10 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
 
   // ---- read encapsulation header ----
   uint8_t hdr[ENIP_HEADER_LEN];
-  if (!readExact(hdr, ENIP_HEADER_LEN, PLC_IO_TIMEOUT_MS)) return false;
+  //  A timed-out reply leaves the stream misaligned; the next reply would be
+  //  parsed as this one's. Drop the session; the PLC thread reconnects
+  //  through the probe.
+  if (!readExact(hdr, ENIP_HEADER_LEN, PLC_IO_TIMEOUT_MS)) { end(); return false; }
   if (get16(hdr + 0) != ENIP_CMD_SENDRRDATA) return false;
   if (get32(hdr + 8) != 0) return false;           // encapsulation status
   uint16_t bodyLen = get16(hdr + 2);
@@ -253,7 +256,10 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
 
   static uint8_t body[EIP_MAX_MSG];
   if (bodyLen > sizeof(body)) return false;
-  if (!readExact(body, bodyLen, PLC_IO_TIMEOUT_MS)) return false;
+  //  A timed-out reply leaves the stream misaligned; the next reply would be
+  //  parsed as this one's. Drop the session; the PLC thread reconnects
+  //  through the probe.
+  if (!readExact(body, bodyLen, PLC_IO_TIMEOUT_MS)) { end(); return false; }
 
   // parse CPF
   size_t j = 0;

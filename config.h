@@ -864,16 +864,17 @@
 #define WATERVOL_RESTORE_ENABLE 1
 #define WATERVOL_DROP_EPS       0.5f   // below last-good by more than this
 //
-//  HMI RESET HANDSHAKE. The button clears the LIFETIME total, which the PLC
-//  owns and zeroes itself. The gateway takes part for one reason: its own
-//  counters must not survive a reset that everything else honoured, or the
-//  cloud and the HMI would disagree about what "since the reset" means.
+//  HMI RESET HANDSHAKE. The button only RAISES the flag (confirmed with
+//  Adam 2026-09-05). The gateway zeroes both totals, the trip mark, the trip
+//  counter and the history, then writes the flag back false as the
+//  acknowledgement.
 //
-//  So the gateway polls the flag, zeroes flowTotal and flowBatch, and writes
-//  the flag back to false. Writing it back is the acknowledgement -- the HMI
-//  can show the button as taken, and a flag left true means the gateway never
-//  saw it (offline, or the tag is missing) rather than a reset that silently
-//  half-happened.
+//  So the gateway polls the flag and, if the PLC accepts every zeroing write,
+//  clears its own flowTotal/flowBatch journal and writes the flag back to
+//  false. Writing it back is the acknowledgement -- the HMI can show the
+//  button as taken, and a flag left true means either the gateway never saw
+//  it (offline, or the tag is missing) or the PLC rejected the write, never a
+//  reset that silently half-happened.
 //
 //  The control engineer must create it as BOOL with
 //  ExternalAccess := Read/Write, like the others.

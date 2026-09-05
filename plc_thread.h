@@ -272,12 +272,14 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
                           : "write Timer_11[3].PRE failed");
       break;
     }
+#if FLOW_TO_PLC_ENABLE
     case CMD_FLOW_RESET_TOTAL:
-      waterOnReset(w);
-      ok = true;
-      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s", "all water totals reset");
-      LOGLN("[FLOW] all water totals reset (gateway + PLC lifetime)");
+      ok = waterOnReset(w);
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s",
+               ok ? "all water totals reset" : "water reset: PLC write failed");
+      if (ok) LOGLN("[FLOW] all water totals reset (gateway + PLC lifetime, trip, history)");
       break;
+#endif
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;
@@ -303,7 +305,11 @@ static void drainCommands(PlcSnapshot& w, bool allowWrites) {
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control: plc offline");
       continue;
     }
-    if (!ctrl.controlEnabled) {
+    //  The master switch means "a human is operating the machine". Zeroing
+    //  the water books is bookkeeping, not operation, so the reset command
+    //  passes this gate (it still needs the PLC online, below).
+    const bool bookkeeping = (c.tag == CMD_FLOW_RESET_TOTAL);
+    if (!ctrl.controlEnabled && !bookkeeping) {
       LOG("[CTRL] dropped, control disabled: tag="); LOGLN(c.tag);
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "control disabled");
       continue;
@@ -373,8 +379,10 @@ static void plcThreadBody() {
       if (eip.connected()) {
         pollValvesInto(w);
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
+#if FLOW_TO_PLC_ENABLE
         wdWherePlc(WD_AT_CIPWRITE);
         waterToPlc(w);                        // rate-limited inside to 5 s
+#endif
       }
       wdWherePlc(WD_AT_CIPWRITE);
       drainCommands(w, true);
