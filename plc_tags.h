@@ -173,7 +173,7 @@ static_assert(sizeof(DINT_SLOT) / sizeof(DINT_SLOT[0]) == N_DINT,
 #define TAG_DESORP_PRE_T11  "Timer_11[3].PRE"    // bottom chamber
 #define TAG_DESORP_ACC_T6   "Timer_6[3].ACC"
 #define TAG_DESORP_ACC_T11  "Timer_11[3].ACC"
-#define DESORP_TIME_MIN_MIN 10
+#define DESORP_TIME_MIN_MIN 5                    // 2026-09-05: both clamps 5-60 (Adam)
 #define DESORP_TIME_MAX_MIN 60
 
 //  Valve / pump / position sweep. Slot order is a contract with
@@ -211,5 +211,12 @@ static const char* const STATE_TAGS[] = {
 static_assert(N_VALVE == 36,  "cloud_side.h TAKE_V* list covers 36 valve slots");
 static_assert(N_STATE == 27,  "15 actions + 12 state bits");
 static_assert(N_ACTION < N_STATE, "action bits come first");
+
+//  Trip history ring in the PLC, newest first (the HMI reads them in this
+//  order). Five separate REAL tags, not an array -- the controls engineer's
+//  toolchain does not take REAL arrays. Names live in config.h.
+static const char* const TRIP_HIST_TAGS[TRIP_HIST_N] = {
+  TAG_TRIP_HIST1, TAG_TRIP_HIST2, TAG_TRIP_HIST3, TAG_TRIP_HIST4, TAG_TRIP_HIST5
+};
 
 #endif // PLC_TAGS_H

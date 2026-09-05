@@ -72,6 +72,20 @@ struct PlcSnapshot {
   char     lastError[LASTERR_CAP];   // "ok", "read fail x3 (cip=0x5)", ...
   uint32_t plcStackFree;   // PLC thread's own stack watermark, bytes
   uint32_t cmdDropped;     // commands lost to a full queue, cumulative
+
+  // ---- water accounting (batch 2), all computed on the PLC thread ----
+  float    flowRate;           // L/min from the pulse meter
+  float    flowTotal;          // litres since the last reset, gateway-side
+  float    flowBatch;          // litres of THIS discharge, held through the idle gap
+  float    waterOwedL;         // measured but not yet committed to the PLC total
+  float    liveCum;            // PLC base + owed: the live lifetime total  -> displayWaterVolume
+  float    liveTrip;           // liveCum - trip mark, rollover-aware        -> tripWaterVolume
+  bool     liveTripValid;      // mark was readable and sane this pass
+  bool     plcFlowWriteOk;     // rate + volume + base path all succeeded this pass
+  bool     hmiWriteOk;         // last hourly HMI write succeeded
+  uint32_t hmiWriteCount;      // hourly HMI writes performed
+  uint32_t plcTotalRestores;   // lifetime-total restores after a PLC download
+  int32_t  desorpPreMinT11;    // Timer_11[3].PRE / 60000, 0 = not read (consistency check vs T6)
 };
 
 // ---------------------------------------------------------------------
