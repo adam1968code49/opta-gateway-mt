@@ -29,3 +29,9 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   boot tick refreshed the HMI (hmiWriteCount=1, ok). cumulative=display=8.04 L; trip=8.04 L because
   trip_watervolume_mark is 0 until the first HMI trip reset. waterOwedL=0, plcTotalRestores=0.
   Boot counter n=39 -> 40 (OTA). Soak baseline for batch 2: n=40.
+
+- 2026-09-05 07:43 PT batch 5 on IP2 via OTA, fw bf7f74b: 149 properties; heat-pump sweep live
+  (hpHtgSp1/Sp2 49/41, hpClgSp1/Sp2 6/10 consistent with staging rules -> REAL table aligned;
+  hpDataStale false, HP_In analogs refreshing), plcReadFails 0. Boot counter n=41 -> 42.
+  NOTE: batch 2 (n=40 at 04:57) had restarted once before this OTA (n=41 seen at 07:42);
+  cause not yet attributed. Soak baseline for batch 5: n=42.
