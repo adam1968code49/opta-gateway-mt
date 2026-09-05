@@ -36,6 +36,7 @@ static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 4
 static_assert(sizeof(PlcSnapshot) < 700, "snapshot grew past 700 B");
 static_assert(DESORP_TIME_MIN_MIN == 5 && ADSORP_TIME_MIN_MIN == 5, "clamp floor is 5 min for both timers");
 static_assert(sizeof(TRIP_HIST_TAGS) / sizeof(TRIP_HIST_TAGS[0]) == TRIP_HIST_N, "five history tags, newest first");
+static_assert(N_HP_REAL == 29 && N_HP_BOOL == 11, "batch 5 heat-pump tables");
 
 // ---- the CIP client: DEFINED here, USED only by the PLC thread ----------
 EthernetClient   plcTransport;

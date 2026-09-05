@@ -219,4 +219,85 @@ static const char* const TRIP_HIST_TAGS[TRIP_HIST_N] = {
   TAG_TRIP_HIST1, TAG_TRIP_HIST2, TAG_TRIP_HIST3, TAG_TRIP_HIST4, TAG_TRIP_HIST5
 };
 
+// ---------------------------------------------------------------------
+//  BATCH 5: heat pump, THROUGH THE PLC. Names verbatim from the old
+//  firmware (opta-plc-gateway-ip2.ino 237-296). The PLC drives the unit
+//  (460ESBM/BACnet today, Modbus later); the gateway only reads and writes
+//  these tags.
+// ---------------------------------------------------------------------
+//  PLC staging logic
+#define TAG_HP_LOOPTEMP     "HP_LoopTemp_PV"
+#define TAG_HP_ACT1         "HP_Stage1_Activation"
+#define TAG_HP_ACT2         "HP_Stage2_Activation"
+#define TAG_HP_CALL1        "HP_Stage1_Call"
+#define TAG_HP_CALL2        "HP_Stage2_Call"
+#define TAG_HP_SAT1         "HP_Stage1_Satisfied"
+#define TAG_HP_SAT2         "HP_Stage2_Satisfied"
+#define TAG_HP_Y1           "HP_Y1A_Cmd"
+#define TAG_HP_Y2           "HP_Y2A_Cmd"
+#define TAG_HP_REVERSE      "HP_Reverse_Cmd"
+#define TAG_HP_COOLREQ      "HP_Mode_CoolRequest"
+#define TAG_HP_TEMPVALID    "HP_TempValid"
+#define TAG_HP_ENABLE       "HP_Enable"
+#define TAG_HP_MANUAL       "HP_Manual_Override"
+//  Unit status via the PLC's HP_In UDT (from the 460ESBM)
+#define TAG_HP_DISCH_T      "HP_In.Disch_Temp"
+#define TAG_HP_SUCT_P       "HP_In.LPS1_Suction"
+#define TAG_HP_DISCH_P      "HP_In.HPS1_Discharge"
+#define TAG_HP_EVAP_T       "HP_In.Evap1_Temp"
+#define TAG_HP_COND_T       "HP_In.Cond1_Temp"
+#define TAG_HP_SUCTLINE_T   "HP_In.SuctionLine1_Temp"
+#define TAG_HP_SUPERHEAT    "HP_In.Superheat1"
+#define TAG_HP_EEV_POS      "HP_In.EEV1_Position"
+#define TAG_HP_COMP_I       "HP_In.Comp1_Current"
+#define TAG_HP_OD_IN        "HP_In.Outdoor_IN"
+#define TAG_HP_OD_OUT       "HP_In.Outdoor_OUT"
+#define TAG_HP_ID_IN        "HP_In.Indoor_IN"
+#define TAG_HP_OPMODE       "HP_In.Operation_Mode"
+#define TAG_HP_LIMITS       "HP_In.Limits_Word"
+#define TAG_HP_ALARM1       "HP_In.PermAlarms1"
+#define TAG_HP_ALARM2       "HP_In.PermAlarms2"
+#define TAG_HP_BOARDFLT     "HP_In.Board_Faults"
+#define TAG_HP_SENSORFLT    "HP_In.Sensor_Faults"
+//  Setpoints (read back only in batch 5; edited in Studio 5000)
+#define TAG_HP_HTG_SP1      "HP_Htg_SP_S1"
+#define TAG_HP_HTG_SP2      "HP_Htg_SP_S2"
+#define TAG_HP_HTG_D1       "HP_Htg_Delta_S1"
+#define TAG_HP_HTG_D2       "HP_Htg_Delta_S2"
+#define TAG_HP_CLG_SP1      "HP_Clg_SP_S1"
+#define TAG_HP_CLG_SP2      "HP_Clg_SP_S2"
+#define TAG_HP_CLG_D1       "HP_Clg_Delta_S1"
+#define TAG_HP_CLG_D2       "HP_Clg_Delta_S2"
+#define TAG_HP_HIGHLIMIT    "HP_Htg_HighLimit"
+
+//  Slot order is a contract with cloud_side.h's TAKE_H* list.
+static const char* const HP_REAL_TAGS[] = {
+  TAG_HP_LOOPTEMP, TAG_HP_ACT1, TAG_HP_ACT2,                          //  0.. 2  PLC-computed
+  TAG_HP_DISCH_T, TAG_HP_SUCT_P, TAG_HP_DISCH_P,                      //  3.. 5  HP_In analog
+  TAG_HP_EVAP_T, TAG_HP_COND_T, TAG_HP_SUCTLINE_T,                    //  6.. 8
+  TAG_HP_SUPERHEAT, TAG_HP_EEV_POS, TAG_HP_COMP_I,                    //  9..11
+  TAG_HP_OD_IN, TAG_HP_OD_OUT, TAG_HP_ID_IN,                          // 12..14
+  TAG_HP_OPMODE, TAG_HP_LIMITS, TAG_HP_ALARM1,                        // 15..17  words as REAL
+  TAG_HP_ALARM2, TAG_HP_BOARDFLT, TAG_HP_SENSORFLT,                   // 18..20
+  TAG_HP_HTG_SP1, TAG_HP_HTG_SP2, TAG_HP_HTG_D1, TAG_HP_HTG_D2,       // 21..24  setpoints
+  TAG_HP_CLG_SP1, TAG_HP_CLG_SP2, TAG_HP_CLG_D1, TAG_HP_CLG_D2        // 25..28
+};
+#define N_HP_REAL (sizeof(HP_REAL_TAGS) / sizeof(HP_REAL_TAGS[0]))
+//  Stale detection watches only the HP_In analog slots: PLC-computed
+//  values (0..2) move on setpoint edits with the link dead, and the words
+//  (15..20) are legitimately constant for hours.
+#define HP_STALE_FIRST 3
+#define HP_STALE_LAST  14
+
+static const char* const HP_BOOL_TAGS[] = {
+  TAG_HP_CALL1, TAG_HP_CALL2, TAG_HP_SAT1, TAG_HP_SAT2,               //  0.. 3
+  TAG_HP_Y1, TAG_HP_Y2, TAG_HP_REVERSE, TAG_HP_COOLREQ,               //  4.. 7
+  TAG_HP_TEMPVALID, TAG_HP_ENABLE, TAG_HP_MANUAL                      //  8..10
+};
+#define N_HP_BOOL (sizeof(HP_BOOL_TAGS) / sizeof(HP_BOOL_TAGS[0]))
+
+static_assert(N_HP_REAL == 29, "cloud_side.h TAKE_HR/HI list covers 29 heat-pump REAL slots");
+static_assert(N_HP_BOOL == 11, "cloud_side.h TAKE_HB list covers 11 heat-pump BOOL slots");
+static_assert(HP_STALE_LAST < N_HP_REAL, "stale window inside the REAL table");
+
 #endif // PLC_TAGS_H
