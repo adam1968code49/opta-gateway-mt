@@ -6,8 +6,9 @@
 //  PLC data. Takes the published snapshot and, when its seq has advanced,
 //  copies each slot into its Cloud* -- skipping slots the PLC thread did
 //  not read this tick, so a stale property keeps its last real value
-//  instead of becoming 0. The seven String properties are built here from
-//  char[], on main, at assignment time. That is the whole tearing story.
+//  instead of becoming 0. The String properties fed from PLC data
+//  (lastError, plcFailTag, plcStateText) are built here from char[], on
+//  main, at assignment time. That is the whole tearing story.
 // =====================================================================
 
 #include "thingProperties.h"
@@ -15,13 +16,16 @@
 
 static PlcSnapshot s_local = {};
 
-//  Assign sensor slot i to a Cloud* only if it was read this tick.
-#define TAKE(i, var) do { if (s_local.ok[i]) var = s_local.sensor[i]; } while (0)
+//  Assign sensor slot i only if it was read this tick.
+#define TAKE(i, var)    do { if (s_local.ok[i])      var = s_local.sensor[i]; } while (0)
+//  Valve sweep: BOOL tags arrive as 0.0/1.0 -- compare against 0.5.
+#define TAKE_VB(i, var) do { if (s_local.valveOk[i]) var = (s_local.valve[i] > 0.5f); } while (0)
+#define TAKE_VF(i, var) do { if (s_local.valveOk[i]) var = s_local.valve[i]; } while (0)
 
 static void cloudSideAssign() {
   SHARED_ASSERT_ON_MAIN();
-  //  Slot order == SENSOR_TAGS order in plc_tags.h. Same 28 names as the
-  //  ASSIGN block in the old pollSensors().
+
+  // ---- sensors: slot order == SENSOR_TAGS ---------------------------------
   TAKE( 0, t1HotTank);     TAKE( 1, t2ColdTank);
   TAKE( 2, t3TopChIn);     TAKE( 3, t4TopChOut);
   TAKE( 4, t5BotChIn);     TAKE( 5, t6BotChOut);
@@ -38,11 +42,50 @@ static void cloudSideAssign() {
   TAKE(25, atmTempDs);     TAKE(26, atmRhDs);
   TAKE(27, tankLevel);
 
+  // ---- valve sweep: slot order == VALVE_TAGS -------------------------------
+  TAKE_VB( 0, valveS1);    TAKE_VB( 1, valveS5);   TAKE_VB( 2, valveS6);
+  TAKE_VB( 3, valveS7);    TAKE_VB( 4, valveS10);
+  TAKE_VB( 5, valveV1A);   TAKE_VB( 6, valveV1B);
+  TAKE_VB( 7, valveV2A1);  TAKE_VB( 8, valveV2A2); TAKE_VB( 9, valveV2B);
+  TAKE_VB(10, pumpScroll); TAKE_VB(11, pumpCond);
+  TAKE_VB(12, pumpHotWater); TAKE_VB(13, pumpColdWater);
+  TAKE_VB(14, boosterVfdRun);
+  TAKE_VF(15, posS2);  TAKE_VF(16, posS3);  TAKE_VF(17, posS4);
+  TAKE_VF(18, posS8);  TAKE_VF(19, posS9);
+  TAKE_VF(20, posV10); TAKE_VF(21, posV11);
+  TAKE_VF(22, hmiWaterTotal); TAKE_VF(23, cumulativeWaterVolume);
+  TAKE_VB(24, pressError); TAKE_VB(25, tempError); TAKE_VB(26, genError);
+  TAKE_VB(27, stStage1);     TAKE_VB(28, stStage2);     TAKE_VB(29, stAuxHeat);
+  TAKE_VB(30, stIndoorCirc); TAKE_VB(31, stIndoorFlow); TAKE_VB(32, stOutdoorFlow);
+  TAKE_VB(33, stLockout);    TAKE_VB(34, stPhaseFault); TAKE_VB(35, stBACnetControl);
+  plcReadFails = (int)s_local.valveFails;
+  plcFailTag   = String(s_local.failTag);
+
+  // ---- state words and timers: only when the 6 s sweep actually ran -------
+  static uint32_t lastStateSeq = 0;
+  if (s_local.stateSeq != lastStateSeq) {
+    lastStateSeq = s_local.stateSeq;
+    plcActionWord     = (int)s_local.actionWord;
+    plcStateWord      = (int)s_local.stateWord;
+    plcStateText      = String(s_local.stateText);
+    adsorpElapsedS    = (int)s_local.adsorpElapsedS;
+    desorpElapsedT6S  = (int)s_local.desorpElapsedT6S;
+    desorpElapsedT11S = (int)s_local.desorpElapsedT11S;
+    //  Preset read-back: the dashboard shows what the PLC runs. A local
+    //  assignment to a READWRITE property publishes without re-entering
+    //  its callback.
+    if (s_local.adsorpPreMin > 0) adsorpTimeMs = (int)s_local.adsorpPreMin;
+    if (s_local.desorpPreMin > 0) desorpTimeMs = (int)s_local.desorpPreMin;
+  }
+
+  // ---- link ---------------------------------------------------------------
   plcConnected = s_local.plcConnected;
   eipMs        = (int)s_local.eipMs;
   lastError    = String(s_local.lastError);     // String built on main, from char[]
 }
 #undef TAKE
+#undef TAKE_VB
+#undef TAKE_VF
 
 //  Call every main pass. Cheap when nothing changed: one mutex-guarded
 //  struct copy and a compare.
@@ -52,13 +95,10 @@ inline bool cloudSideConsume(uint32_t& lastSeq) {
   return true;
 }
 
-inline uint32_t cloudSideSnapshotAgeMs() {
-  return millis() - s_local.stampMs;
-}
-
-inline uint32_t cloudSidePlcStackFree() { return s_local.plcStackFree; }
-inline uint32_t cloudSideCmdDropped()   { return s_local.cmdDropped; }
-inline bool     cloudSidePlcConnected() { return s_local.plcConnected; }
-inline bool     cloudSideHasSnapshot()  { return s_local.seq != 0; }   // false until the PLC thread published once
+inline uint32_t cloudSideSnapshotAgeMs() { return millis() - s_local.stampMs; }
+inline uint32_t cloudSidePlcStackFree()  { return s_local.plcStackFree; }
+inline uint32_t cloudSideCmdDropped()    { return s_local.cmdDropped; }
+inline bool     cloudSidePlcConnected()  { return s_local.plcConnected; }
+inline bool     cloudSideHasSnapshot()   { return s_local.seq != 0; }   // false until the PLC thread published once
 
 #endif // CLOUD_SIDE_H
