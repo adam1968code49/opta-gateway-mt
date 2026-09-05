@@ -369,24 +369,28 @@ static void wifiRescue(unsigned long now) {
 }
 #endif
 
-// ---- OTA gate. Batch 0 has no controlEnabled, so always allow. -----------
-//  Batch 1 restores `allow = !controlEnabled` with controlEnabled read
-//  from CtrlState.
+// ---- OTA gate: apply unless someone is operating the machine remotely. ---
+//  A reboot costs ~30 s of telemetry; the PLC keeps running the machine.
+//  The one thing worth waiting for is an in-flight control session, where
+//  a reboot would drop a setpoint the operator thinks they made.
 #if OTA_ENABLE
 bool onOTARequestCallback() {
-  otaPending = false;
-  LOGLN("[OTA] apply requested -> ALLOW (batch 0: no control path to protect)");
-  return true;
+  bool const allow = !ctrlControlEnabled();
+  otaPending = !allow;
+  LOG("[OTA] apply requested -> ");
+  LOGLN(allow ? "ALLOW" : "POSTPONE (controlEnabled is on)");
+  return allow;
 }
 #endif
 
 // ---- panel LEDs: PLC session, cloud link, fault ---------------------------
-//  Fault in batch 0 = PLC disconnected or PLC thread stalled. The PLC
-//  error flags (pressError etc.) return with batch 1.
+//  Fault = PLC disconnected, PLC thread stalled, or any PLC error flag.
 static void panelLeds(bool plcStalled) {
   digitalWrite(LED_PLC,   (bool)plcConnected ? HIGH : LOW);
   digitalWrite(LED_CLOUD, ArduinoCloud.connected() ? HIGH : LOW);
-  digitalWrite(LED_FAULT, (!(bool)plcConnected || plcStalled) ? HIGH : LOW);
+  bool fault = !(bool)plcConnected || plcStalled
+            || (bool)pressError || (bool)tempError || (bool)genError;
+  digitalWrite(LED_FAULT, fault ? HIGH : LOW);
 }
 
 static StackWatch s_mainStack;
@@ -479,7 +483,9 @@ void loop() {
   static uint32_t lastSeq = 0;
   cloudSideConsume(lastSeq);
   ctrlPoll();
-  bool plcStalled = cloudSideSnapshotAgeMs() > 3 * SAMPLE_INTERVAL_MS;
+  //  Not stalled before the PLC thread has published once: stampMs is 0
+  //  until then and would read as a minutes-old snapshot.
+  bool plcStalled = cloudSideHasSnapshot() && cloudSideSnapshotAgeMs() > 3 * SAMPLE_INTERVAL_MS;
   if (plcStalled) {
     static unsigned long lastWarn = 0;
     if (millis() - lastWarn > 10000) {
@@ -506,12 +512,18 @@ void loop() {
 
   unsigned long now = millis();
 
+  // ---- panel LEDs, 3 s, regardless of serial debug -------------------------
+  static unsigned long lastLed = 0;
+  if (now - lastLed >= 3000) {
+    lastLed = now;
+    panelLeds(plcStalled);
+  }
+
   // ---- heartbeat, 3 s, serial only ----------------------------------------
 #if ENABLE_SERIAL_DEBUG
   static unsigned long lastHb = 0;
   if (now - lastHb >= 3000) {
     lastHb = now;
-    panelLeds(plcStalled);
     LOG("[HB] wifi=");  LOG(WiFi.status() == WL_CONNECTED ? "up" : "down");
     LOG(" cloud=");     LOG(ArduinoCloud.connected() ? "up" : "down");
     LOG(" plc=");       LOG((bool)plcConnected ? "1" : "0");

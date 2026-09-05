@@ -729,7 +729,7 @@
 //  name does not return "the error". Reading it needs specific elements
 //  (Error_Signal[n]) and, before that, someone has to say which n mean
 //  what. Adding it blind would publish a number nobody can interpret.
-#define PLC_STATE_ENABLE       0   // batch 1 -- off in batch 0
+#define PLC_STATE_ENABLE       1   // batch 1: the state sweep is on (record only)
 #define PLC_STATE_POLL_MS      6000    // >= SAMPLE_INTERVAL_MS, quantised to it
 
 //  plcActionWord -- bit N = Action_(N+1), so Action_1 is bit 0.
@@ -977,7 +977,7 @@
 //  These reads are BOOL, and batched MSP decoding of BOOL only works
 //  because EtherNetIP.cpp gained a CIP_TYPE_BOOL branch -- without it
 //  16 valves would need 16 separate round-trips per poll instead of 2.
-#define VALVE_ENABLE         0   // batch 1 -- off in batch 0
+#define VALVE_ENABLE         1   // batch 1: the valve sweep is on (record only; plc_thread.h does not test it)
 
 //  Discrete pneumatic valves (Expansion:3:O)
 #define TAG_V_S1      "Air_S1"
