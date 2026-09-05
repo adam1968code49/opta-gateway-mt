@@ -48,6 +48,7 @@ static CtrlState     s_ctrlLocal = {};
 //  applies, and control is disarmed so the operator has to flip the
 //  master switch on again.
 static void ctrlOnCloudSync() {
+  SHARED_ASSERT_ON_MAIN();
   s_syncSeen = true;
   s_syncMs   = millis();
   s_ctrlLocal.controlEnabled = false;
@@ -59,6 +60,7 @@ static void ctrlOnCloudSync() {
 //  Fired when the cloud connection drops. The next connection will replay
 //  stored values again, so go back to ignoring until the next SYNC.
 static void ctrlOnCloudDisconnect() {
+  SHARED_ASSERT_ON_MAIN();
   s_syncSeen = false;
   s_ctrlLocal.controlEnabled = false;
   sharedCtrlWrite(s_ctrlLocal);
@@ -81,6 +83,7 @@ static bool ctrlQuiet() {
 static bool ctrlGate(const char* what) {
   if (ctrlQuiet()) {
     LOG("[CTRL] ignored (first sync): "); LOGLN(what);
+    lastError = "control: syncing, wait 15 s";
     return false;
   }
   if (!s_ctrlLocal.controlEnabled) {
@@ -123,6 +126,7 @@ void onControlEnabledChange() {
   LOG("[CTRL] controlEnabled -> "); LOGLN(on ? "TRUE" : "FALSE");
   if (ctrlQuiet()) {
     LOGLN("[CTRL] ignored (first sync): controlEnabled");
+    lastError = "control: syncing, wait 15 s";
     if (on) controlEnabled = false;          // show the truth; operator flips it on again
     return;
   }
