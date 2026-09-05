@@ -20,3 +20,7 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   publishing every 2 s, main stackFree=26256, PLC session in 3 ms, boot-connect stall
   5999 ms @2 (cloud, expected). plcStk not recorded: board not on a serial console.
   Boot counter n=35 -> 36 (the OTA reboot). Soak baseline n=36.
+- 2026-09-05 02:19 PT batch 1 on IP2 via OTA, fw 8120373: 94 properties, valve/state sweeps live
+  (plcReadFails=0, plcFailTag=ok, plcStateWord=0xF04), controls quiet-gated and all False.
+  Boot counter n=38 -> 39 (OTA). Old firmware had restarted once overnight (n 37->38, ~2.4 h uptime).
+  Soak baseline for batch 1: n=39. Observed: pressError=True on the PLC; desorp preset reads 9 min.
