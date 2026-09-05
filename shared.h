@@ -86,6 +86,18 @@ struct PlcSnapshot {
   uint32_t hmiWriteCount;      // hourly HMI writes performed
   uint32_t plcTotalRestores;   // lifetime-total restores after a PLC download
   int32_t  desorpPreMinT11;    // Timer_11[3].PRE / 60000, 0 = not read (consistency check vs T6)
+
+  // ---- heat pump through the PLC (batch 5, every 3rd tick, offset 1) ----
+  //  Slot order == HP_REAL_TAGS / HP_BOOL_TAGS. Words (15..20) are REAL
+  //  bit fields, main truncates to int; BOOLs arrive as 0.0/1.0.
+  float    hpReal[N_HP_REAL];
+  bool     hpRealOk[N_HP_REAL];
+  float    hpBool[N_HP_BOOL];
+  bool     hpBoolOk[N_HP_BOOL];
+  int32_t  hpFails;            // slots unread in the last heat-pump sweep
+  int32_t  hpDataAgeS;         // seconds since any HP_In analog last changed
+  bool     hpDataStale;        // hpDataAgeS >= HP_STALE_TIMEOUT_MS/1000
+  uint32_t hpSeq;              // +1 each heat-pump sweep; main assigns only on change
 };
 
 // ---------------------------------------------------------------------

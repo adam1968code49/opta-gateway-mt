@@ -33,10 +33,11 @@
 #include "cloud_ctrl.h"
 static_assert(N_VALVE == 36 && N_STATE == 27 && N_ACTION == 15, "batch 1 sweep tables");
 static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
-static_assert(sizeof(PlcSnapshot) < 700, "snapshot grew past 700 B");
+static_assert(sizeof(PlcSnapshot) < 960, "snapshot grew past 960 B");
 static_assert(DESORP_TIME_MIN_MIN == 5 && ADSORP_TIME_MIN_MIN == 5, "clamp floor is 5 min for both timers");
 static_assert(sizeof(TRIP_HIST_TAGS) / sizeof(TRIP_HIST_TAGS[0]) == TRIP_HIST_N, "five history tags, newest first");
 static_assert(N_HP_REAL == 29 && N_HP_BOOL == 11, "batch 5 heat-pump tables");
+static_assert(sizeof(PlcSnapshot().hpReal) == N_HP_REAL * sizeof(float), "batch 5 snapshot");
 
 // ---- the CIP client: DEFINED here, USED only by the PLC thread ----------
 EthernetClient   plcTransport;
