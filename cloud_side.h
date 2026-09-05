@@ -78,6 +78,18 @@ static void cloudSideAssign() {
     if (s_local.desorpPreMin > 0) desorpTimeMs = (int)s_local.desorpPreMin;
   }
 
+  // ---- water accounting (batch 2) -----------------------------------------
+  flowRate           = s_local.flowRate;
+  flowTotal          = s_local.flowTotal;
+  flowBatch          = s_local.flowBatch;
+  waterOwedL         = s_local.waterOwedL;
+  displayWaterVolume = s_local.liveCum;
+  if (s_local.liveTripValid) tripWaterVolume = s_local.liveTrip;
+  plcFlowWriteOk     = s_local.plcFlowWriteOk;
+  hmiWriteOk         = s_local.hmiWriteOk;
+  hmiWriteCount      = (int)s_local.hmiWriteCount;
+  plcTotalRestores   = (int)s_local.plcTotalRestores;
+
   // ---- link ---------------------------------------------------------------
   plcConnected = s_local.plcConnected;
   eipMs        = (int)s_local.eipMs;

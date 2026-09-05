@@ -2,7 +2,7 @@
 // =====================================================================
 //  Batch 1 property set: the 43 of batch 0 plus valves / pumps /
 //  positions, fault flags, heat-pump St_* status bits, PLC state words,
-//  cycle timers, and the seven READWRITE controls with their callbacks.
+//  cycle timers, and the eight READWRITE controls (seven machine controls and flowResetTotal) with their callbacks.
 //  Declarations and registrations are verbatim from
 //  opta-plc-gateway-ip2/thingProperties.h so the same Thing and dashboard
 //  keep working. Still absent (later batches): water accounting writes,
@@ -99,6 +99,19 @@ CloudInt    adsorpElapsedS;    // Timer_3.ACC
 CloudInt    desorpElapsedT6S;  // Timer_6[3].ACC   (top chamber)
 CloudInt    desorpElapsedT11S; // Timer_11[3].ACC  (bottom chamber)
 
+// ---- water accounting (batch 2), computed on the PLC thread --------------
+CloudFloat  flowRate;               // RO: L/min, from pulse frequency (F = 38*Q)
+CloudFloat  flowTotal;              // RO: cumulative liters through the sensor
+CloudFloat  flowBatch;              // RO: liters of THIS discharge (see config.h)
+CloudBool   flowResetTotal;         // RW momentary: reset the cumulative total
+CloudBool   plcFlowWriteOk;
+CloudFloat  displayWaterVolume;     // RO: LIVE lifetime total (not the HMI's)
+CloudFloat  tripWaterVolume;        // RO: LIVE trip total
+CloudFloat  waterOwedL;             // RO: liters awaiting commit to the PLC
+CloudBool   hmiWriteOk;             // RO: last hourly HMI update succeeded
+CloudInt    hmiWriteCount;          // RO: hourly HMI writes performed
+CloudInt    plcTotalRestores;       // RO: lifetime-total restores performed
+
 // ---- controls (dashboard -> PLC), all behind controlEnabled --------------
 CloudBool  controlEnabled;     // master gate for ALL writes to the PLC
 CloudBool  systemRun;          // ON -> Start_Button = true (start auto cycle)
@@ -106,7 +119,7 @@ CloudBool  stopButton;         // -> Stop_Button
 CloudBool  resetButton;        // -> Reset_Button
 CloudBool  purgeButton;        // -> Purge_Button
 CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
-CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 10-60
+CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 5-60
 
 // ---- diagnostics -------------------------------------------------------
 CloudBool   plcConnected;
@@ -137,6 +150,7 @@ void onResetButtonChange();
 void onPurgeButtonChange();
 void onAdsorpTimeMsChange();
 void onDesorpTimeMsChange();
+void onFlowResetTotalChange();
 
 void initProperties() {
   // --- sensors ---
@@ -220,6 +234,19 @@ void initProperties() {
   ArduinoCloud.addProperty(plcActionWord,     READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcStateWord,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcStateText,      READ, ON_CHANGE);
+
+  // --- water accounting ---
+  ArduinoCloud.addProperty(flowRate,           READ, 5 * SECONDS);
+  ArduinoCloud.addProperty(flowTotal,          READ, 10 * SECONDS);
+  ArduinoCloud.addProperty(flowBatch,          READ, 10 * SECONDS);
+  ArduinoCloud.addProperty(flowResetTotal,     READWRITE, ON_CHANGE, onFlowResetTotalChange);
+  ArduinoCloud.addProperty(plcFlowWriteOk,     READ, ON_CHANGE);
+  ArduinoCloud.addProperty(displayWaterVolume, READ, 10 * SECONDS);
+  ArduinoCloud.addProperty(tripWaterVolume,    READ, 10 * SECONDS);
+  ArduinoCloud.addProperty(waterOwedL,         READ, 30 * SECONDS);
+  ArduinoCloud.addProperty(hmiWriteOk,         READ, ON_CHANGE);
+  ArduinoCloud.addProperty(hmiWriteCount,      READ, ON_CHANGE);
+  ArduinoCloud.addProperty(plcTotalRestores,   READ, ON_CHANGE);
 
   // --- controls (dashboard -> PLC), all behind controlEnabled ---
   ArduinoCloud.addProperty(controlEnabled, READWRITE, ON_CHANGE, onControlEnabledChange);

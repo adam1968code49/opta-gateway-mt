@@ -168,4 +168,22 @@ void onDesorpTimeMsChange() {
   ctrlPost(CMD_DESORP_TIME_MS, false, (float)mins, "desorpTime");
 }
 
+//  Momentary reset of the water totals. NOT behind controlEnabled: that gate
+//  means "a human is operating the machine remotely"; zeroing a counter is
+//  bookkeeping. The quiet period still applies -- a replayed true must not
+//  wipe the totals -- and the switch is always written back false. With the
+//  PLC away the command is dropped and reported ("control: plc offline");
+//  press again when it is back.
+void onFlowResetTotalChange() {
+  SHARED_ASSERT_ON_MAIN();
+  if (!(bool)flowResetTotal) return;
+  if (ctrlQuiet()) {
+    LOGLN("[CTRL] ignored (first sync): flowResetTotal");
+    flowResetTotal = false;
+    return;
+  }
+  ctrlPost(CMD_FLOW_RESET_TOTAL, true, 1.0f, "flowResetTotal");
+  flowResetTotal = false;
+}
+
 #endif // CLOUD_CTRL_H
