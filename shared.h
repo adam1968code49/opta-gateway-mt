@@ -209,17 +209,33 @@ static inline bool sharedCmdTake(Cmd& out) {
 //  loudest possible failure and on a deployed board is caught by the
 //  watchdog feeder giving up on the stuck thread.
 // ---------------------------------------------------------------------
-static osThreadId_t g_plcThreadId  = nullptr;
-static osThreadId_t g_mainThreadId = nullptr;
+static osThreadId_t g_plcThreadId   = nullptr;   // set first thing in plcThreadBody
+static osThreadId_t g_cloudThreadId = nullptr;   // set first thing in cloudThreadBody
 
 #if ENABLE_SERIAL_DEBUG
-  #define SHARED_ASSERT_ON_PLC()  do { if (g_plcThreadId && osThreadGetId() != g_plcThreadId) { \
+  #define SHARED_ASSERT_ON_PLC()   do { if (g_plcThreadId && osThreadGetId() != g_plcThreadId) { \
       Serial.println("!! OWNERSHIP: PLC-side code ran off the PLC thread"); for(;;){} } } while (0)
-  #define SHARED_ASSERT_ON_MAIN() do { if (g_mainThreadId && osThreadGetId() != g_mainThreadId) { \
-      Serial.println("!! OWNERSHIP: Cloud* assigned off the main thread"); for(;;){} } } while (0)
+  #define SHARED_ASSERT_ON_CLOUD() do { if (g_cloudThreadId && osThreadGetId() != g_cloudThreadId) { \
+      Serial.println("!! OWNERSHIP: Cloud* touched off the cloud thread"); for(;;){} } } while (0)
 #else
-  #define SHARED_ASSERT_ON_PLC()  do {} while (0)
-  #define SHARED_ASSERT_ON_MAIN() do {} while (0)
+  #define SHARED_ASSERT_ON_PLC()   do {} while (0)
+  #define SHARED_ASSERT_ON_CLOUD() do {} while (0)
 #endif
+
+// ---------------------------------------------------------------------
+//  Panel LEDs. The cloud thread owns the properties the lights depend on;
+//  main owns the pins. One byte crosses: bit0 PLC session, bit1 cloud
+//  link, bit2 fault. Single writer, single reader, byte-atomic.
+// ---------------------------------------------------------------------
+#define LED_BIT_PLC    0x01
+#define LED_BIT_CLOUD  0x02
+#define LED_BIT_FAULT  0x04
+static volatile uint8_t g_ledBits = 0;
+
+//  Non-static, non-inline on purpose: every object in this header is
+//  `static`, so a second translation unit that included it would silently
+//  get its own mutex and its own snapshot. With this symbol here, the
+//  second inclusion is a duplicate-definition link error instead.
+void sharedTuGuard() {}
 
 #endif // SHARED_H

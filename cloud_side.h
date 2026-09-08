@@ -27,7 +27,7 @@ static PlcSnapshot s_local = {};
 #define TAKE_HB(i, var) do { if (s_local.hpBoolOk[i]) var = (s_local.hpBool[i] > 0.5f); } while (0)
 
 static void cloudSideAssign() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
 
   // ---- sensors: slot order == SENSOR_TAGS ---------------------------------
   TAKE( 0, t1HotTank);     TAKE( 1, t2ColdTank);

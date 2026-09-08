@@ -169,7 +169,7 @@ static void sendConfigPage(EthernetClient& c, const char* msg) {
   c.print(F("</b><br>WiFi: <b>"));
   c.print(WiFi.status() == WL_CONNECTED ? F("connected") : F("NOT connected"));
   c.print(F("</b><br>PLC link: <b>"));
-  c.print((bool)plcConnected ? F("connected") : F("NOT connected"));
+  c.print((g_ledBits & LED_BIT_PLC) ? F("connected") : F("NOT connected"));   // main must not read Cloud*
 #if USB_LOG_ENABLE
   //  This page is the ONLY console while USB logging is on: the stick owns
   //  the USB-C port, so there is no serial. Print the two things that were
@@ -408,7 +408,6 @@ void setup() {
   bootReasonLog();
   LOG("\n[MT] opta-gateway-mt starting fw="); LOGLN(FW_VERSION);
 
-  g_mainThreadId = osThreadGetId();
 
   //  Pulse counter armed before anything slow (cloud, PLC) so no pulses
   //  are missed during the rest of boot. Counting only; the PLC thread

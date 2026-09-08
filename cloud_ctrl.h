@@ -48,7 +48,7 @@ static CtrlState     s_ctrlLocal = {};
 //  applies, and control is disarmed so the operator has to flip the
 //  master switch on again.
 static void ctrlOnCloudSync() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   s_syncSeen = true;
   s_syncMs   = millis();
   s_ctrlLocal.controlEnabled = false;
@@ -60,7 +60,7 @@ static void ctrlOnCloudSync() {
 //  Fired when the cloud connection drops. The next connection will replay
 //  stored values again, so go back to ignoring until the next SYNC.
 static void ctrlOnCloudDisconnect() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   s_syncSeen = false;
   s_ctrlLocal.controlEnabled = false;
   sharedCtrlWrite(s_ctrlLocal);
@@ -113,7 +113,7 @@ static void ctrlPost(uint16_t tag, bool isBool, float value, const char* what) {
 //  A BOOL control that cannot be honoured is written back false so the
 //  dashboard never shows ON for something the PLC was not told.
 static void ctrlBool(CloudBool& prop, uint16_t tag, const char* what) {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   const bool on = (bool)prop;
   LOG("[CTRL] "); LOG(what); LOG(" -> "); LOGLN(on ? "ON" : "OFF");
   if (!ctrlGate(what)) { if (on) prop = false; return; }
@@ -121,7 +121,7 @@ static void ctrlBool(CloudBool& prop, uint16_t tag, const char* what) {
 }
 
 void onControlEnabledChange() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   const bool on = (bool)controlEnabled;
   LOG("[CTRL] controlEnabled -> "); LOGLN(on ? "TRUE" : "FALSE");
   if (ctrlQuiet()) {
@@ -149,7 +149,7 @@ void onHpModeCoolChange()  { ctrlBool(hpModeCool,  CMD_HP_MODE_COOL, "hpModeCool
 //  the cloud (a local assignment publishes without re-entering the
 //  callback), post the minutes; the PLC thread does the x60000.
 void onAdsorpTimeMsChange() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   LOG("[CTRL] adsorpTime (min) -> "); LOGLN((int)adsorpTimeMs);
   if (!ctrlGate("adsorpTime")) return;
   int32_t mins = (int32_t)adsorpTimeMs;
@@ -160,7 +160,7 @@ void onAdsorpTimeMsChange() {
 }
 
 void onDesorpTimeMsChange() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   LOG("[CTRL] desorpTime (min) -> "); LOGLN((int)desorpTimeMs);
   if (!ctrlGate("desorpTime")) return;
   int32_t mins = (int32_t)desorpTimeMs;
@@ -177,7 +177,7 @@ void onDesorpTimeMsChange() {
 //  PLC away the command is dropped and reported ("control: plc offline");
 //  press again when it is back.
 void onFlowResetTotalChange() {
-  SHARED_ASSERT_ON_MAIN();
+  SHARED_ASSERT_ON_CLOUD();
   if (!(bool)flowResetTotal) return;
   if (ctrlQuiet()) {
     LOGLN("[CTRL] ignored (first sync): flowResetTotal");
