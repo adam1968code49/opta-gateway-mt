@@ -454,66 +454,6 @@
 #define ENABLE_SERIAL_DEBUG        1     // 1 = verbose Serial logging
 
 // ---------------------------------------------------------------------
-//  On-device AI (NanoEdge anomaly detection)  -- cloud-only, no PLC write
-// ---------------------------------------------------------------------
-//  Inference runs once per clean sensor sweep (see pollSensors()). The
-//  model outputs a similarity in [0,100] (100 = normal); we publish
-//  anomaly score = 100 - similarity. Alarm when the score exceeds this
-//  threshold. Tune after seeing the score's normal-running baseline.
-//  *** IP2 CHANGE: AI is OFF. Two independent reasons, both must clear
-//  before turning it back on:
-//    1. IP1's trained baseline does not transfer. nominal_buffers.h was NOT
-//       copied into this fork (it is IP1's real plant data). With no embedded
-//       baseline the model starts empty and must be live-learned on IP2.
-//    2. 6 of the 28 channels currently publish RAW COUNTS, not engineering
-//       units (see IP2_RAW_SCALING_CONFIRMED in the .ino). A feature vector
-//       mixing raw counts with scaled values is meaningless.
-//  Order to re-enable: fix the scaling -> set AI_ENABLE 1 -> live-learn a
-//  baseline on IP2 (aiLearnEnable) -> only then arm aiAlarmEnable.
-//  Enabled on IP2 2026-08-25 to train a baseline on this machine.
-//  nominal_buffers.h is deliberately ABSENT here: that file holds IP1's
-//  factory baseline, and seeding IP2 from another machine's data would
-//  poison the starting point. Without it the boot-learn is skipped and the
-//  model stays empty until aiLearnEnable is switched on -- which is exactly
-//  the "learn this machine from scratch" behaviour we want.
-//
-//  BEFORE TRAINING, know what the feature vector currently contains: 10 of
-//  the model's 27 inputs are stuck constants -- t11/t12 open-circuit at
-//  1372, atmTemp/atmRh on unwired 4-20mA inputs at 80/120, the four heat
-//  pump inlets and both Vaisala channels at 0. A baseline learned now
-//  encodes those as normal, so repairing any of them later will read as an
-//  anomaly and the baseline will have to be relearned.
-#define AI_ENABLE            0   // batch 4 -- off in batch 0
-#define AI_ALARM_THRESH      90    // score > 90 (similarity < 10) -> alarm
-
-//  Learning (NanoEdge AD knowledge lives in RAM, lost on reset):
-//   * at boot, the device learns from embedded nominal_buffers.h (if present)
-//   * the cloud switch aiLearnEnable triggers a LIVE re-learn from fresh data
-//  AI_LEARN_PASSES : how many times to loop the embedded set at boot.
-#define AI_LEARN_PASSES      1
-//  LIVE re-learn is gated to the "hot, full-load" operating point so a wrong
-//  regime can't be learned as normal. Gate on vals[AI_LEARN_GATE_VALSIDX]
-//  (0 = t1HotTank, per SENSOR_TAGS order) >= AI_LEARN_GATE_MIN.
-#define AI_LEARN_GATE_VALSIDX 0
-#define AI_LEARN_GATE_MIN     60.0f
-//  Auto-stop a live re-learn after this many accepted (in-gate) frames
-//  (0 = no cap; operator stops by turning aiLearnEnable off).
-#define AI_LEARN_LIVE_TARGET  400
-//  AI_LEARN_GATE_MIN above is only the DEFAULT for the cloud-settable
-//  aiLearnGateMin -- change the gate at runtime from the dashboard (e.g.
-//  when a test runs at a different t1HotTank target). Set it very low to
-//  effectively disable the gate.
-
-//  Knowledge persistence (get/set_knowledge <-> KVStore flash). The learned
-//  baseline (boot + any live augmentation) is saved to flash so it survives
-//  a reboot; guarded by the model id so a reflashed/retrained model ignores
-//  a stale blob and re-learns.
-#define AI_KB_KEY       "neai_kb"     // KVStore key: knowledge blob
-#define AI_KB_ID_KEY    "neai_kbid"   // KVStore key: model-id guard
-#define AI_KB_CNT_KEY   "neai_kbcnt"  // KVStore key: learn count
-#define AI_KB_MAX       8192          // max knowledge blob size (bytes)
-
-// ---------------------------------------------------------------------
 //  Pulse flow sensor on the Opta's OWN input terminal (local I/O)
 // ---------------------------------------------------------------------
 //  DIGITEN FL-S402B hall flow sensor, NPN (open-collector) output, wired

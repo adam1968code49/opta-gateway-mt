@@ -6,7 +6,7 @@
 //  Declarations and registrations are verbatim from
 //  opta-plc-gateway-ip2/thingProperties.h so the same Thing and dashboard
 //  keep working. Still absent (later batches): water accounting writes,
-//  AI, heat-pump control and BACnet status, USB.
+//  heat-pump control and BACnet status, USB. (NanoEdge AI dropped 2026-09-08.)
 // =====================================================================
 #include "config.h"
 #include <ArduinoIoTCloud.h>

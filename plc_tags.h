@@ -99,7 +99,7 @@
 
 // ---------------------------------------------------------------------
 //  The 28 sensor tags in canonical slot order. Moved here from the .ino so
-//  the PLC thread and (later) the AI feature map and the USB header can
+//  the PLC thread and (later) the USB header can
 //  share one definition. The order is load-bearing: PlcSnapshot::sensor[]
 //  is indexed by these slot numbers and cloud_side.h assigns Cloud*
 //  properties from them in this order. DO NOT reorder or resize without
