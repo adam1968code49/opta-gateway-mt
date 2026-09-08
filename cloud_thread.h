@@ -28,7 +28,8 @@
 
 #define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
-#define CLOUD_OFFLINE_RESET_MS 900000   // WiFi up but no cloud for this long -> a fresh boot re-resolves everything
+#define CLOUD_OFFLINE_RESET_MS      900000    // WiFi up but no cloud for this long -> a fresh boot re-resolves everything...
+#define CLOUD_OFFLINE_RESET_HARD_MS 1200000   // ...waiting for the water ledger to be flat, but no longer than this
 
 #if WIFI_FORCE_SECURITY
 static void wifiRescue(unsigned long now);   // defined later in the .ino
@@ -49,6 +50,7 @@ static void cloudThreadBody() {
   for (;;) {
     unsigned long pass0 = millis();
     wdBeatCloud();
+    wdWhereCloud(WD_AT_SNAP);           // snapshot copy, 141 Cloud* assignments, status reads
 
     // ---- take the PLC snapshot, assign Cloud* once per PLC tick -------------
     cloudSideConsume(lastSeq);
@@ -76,9 +78,12 @@ static void cloudThreadBody() {
     //  is down -- a reboot would not bring an access point back.
     if (cloudUp || !wifiUp)             cloudDownSince = 0;
     else if (cloudDownSince == 0)       cloudDownSince = cloudT0;
-    else if (cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_MS) {
+    else if (cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_MS
+             && ((float)waterOwedL == 0.0f || cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_HARD_MS)) {
+      //  Wait for the water ledger to be flat (an in-flight batch would be
+      //  lost for good), but not forever. No LOG here: the marker is the
+      //  record, and a blocked serial port must not delay the reset.
       bootMarkIntentional("cloud offline 15min");
-      LOGLN("[CLOUD] WiFi up, cloud down for 15 min -- resetting");
       delay(50);
       NVIC_SystemReset();
     }
@@ -109,7 +114,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
-      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens());
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves());
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());
@@ -133,8 +138,7 @@ static void cloudThreadBody() {
       wifiRssi    = (int)WiFi.RSSI();
     }
 
-    wdWhereCloud(WD_AT_NONE);
-    loopMs = (int)(millis() - pass0);
+    loopMs = (int)(millis() - pass0);   // the pass stays at code 16 through the sleep; 0 now means 'thread not running'
     rtos::ThisThread::sleep_for(std::chrono::milliseconds(CLOUD_PASS_SLEEP_MS));
   }
 }

@@ -93,6 +93,7 @@ static uint32_t       s_probeFailStreak = 0;
 static unsigned long  s_probeFailSince  = 0;   // 0 = not currently refused
 static unsigned long  s_lastFailOpen    = 0;
 static uint32_t       s_cloudFailOpens  = 0;
+static uint32_t       s_reresolves      = 0;   // expiries that led to a fresh lookup
 static unsigned long  s_lastCloudProbe = 0;
 static bool           s_lastProbeOk    = false;
 static uint32_t       s_cloudProbeOks  = 0;
@@ -101,6 +102,7 @@ static uint32_t       s_cloudProbeFails = 0;
 inline uint32_t cloudProbeOks()   { return s_cloudProbeOks; }
 inline uint32_t cloudProbeFails() { return s_cloudProbeFails; }
 inline uint32_t cloudFailOpens()  { return s_cloudFailOpens; }
+inline uint32_t cloudReresolves() { return s_reresolves; }
 
 static unsigned long s_dnsFailMs = 0;   // 0 = no recent failure
 
@@ -110,25 +112,30 @@ static bool cloudProbeOnce() {
   NetworkInterface* net = WiFi.getNetwork();
   if (net == nullptr) return false;
 
-  //  Expire the cached address: by age, or after a run of refusals that
-  //  says the node behind it is gone.
-  if (s_brokerResolved &&
-      (millis() - s_brokerResolvedMs >= CLOUD_DNS_TTL_MS || s_probeFailStreak >= CLOUD_PROBE_FAIL_RERESOLVE)) {
-    s_brokerResolved = false;
-    s_probeFailStreak = 0;
-  }
-  if (!s_brokerResolved) {
+  //  The cached address is stale by age, or after a run of refusals that
+  //  says the node behind it is gone. A stale address is still knocked
+  //  until a fresh lookup SUCCEEDS -- a lookup that fails must not throw
+  //  away an address that may still answer.
+  bool stale = s_brokerResolved &&
+               (millis() - s_brokerResolvedMs >= CLOUD_DNS_TTL_MS || s_probeFailStreak >= CLOUD_PROBE_FAIL_RERESOLVE);
+  if (!s_brokerResolved || stale) {
     //  A failed lookup costs mbed's 5 s x 3 retries. Remember the failure
-    //  and answer "unreachable" from memory for a minute instead of
-    //  paying it again every knock while the uplink is down.
-    if (s_dnsFailMs != 0 && millis() - s_dnsFailMs < CLOUD_DNS_NEG_CACHE_MS) return false;
-    SocketAddress a;
-    if (net->gethostbyname(CLOUD_PROBE_HOST, &a) != NSAPI_ERROR_OK) { s_dnsFailMs = millis(); return false; }
-    s_dnsFailMs = 0;
-    a.set_port(CLOUD_PROBE_PORT);
-    s_brokerAddr = a;
-    s_brokerResolved = true;
-    s_brokerResolvedMs = millis();
+    //  and do not pay it again for a minute.
+    bool negCached = (s_dnsFailMs != 0 && millis() - s_dnsFailMs < CLOUD_DNS_NEG_CACHE_MS);
+    if (!negCached) {
+      SocketAddress a;
+      if (net->gethostbyname(CLOUD_PROBE_HOST, &a) == NSAPI_ERROR_OK) {
+        a.set_port(CLOUD_PROBE_PORT);
+        s_brokerAddr       = a;
+        s_brokerResolved   = true;
+        s_brokerResolvedMs = millis();
+        s_dnsFailMs        = 0;
+        if (stale) { s_reresolves++; s_probeFailStreak = 0; }
+      } else {
+        s_dnsFailMs = millis();
+      }
+    }
+    if (!s_brokerResolved) return false;      // never resolved: nothing to knock
   }
 
   TCPSocket sock;
