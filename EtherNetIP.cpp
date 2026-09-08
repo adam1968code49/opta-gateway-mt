@@ -52,8 +52,11 @@ bool EtherNetIPClient::connected() {
 
 bool EtherNetIPClient::readExact(uint8_t* buf, size_t n, uint32_t timeoutMs) {
   size_t got = 0;
-  uint32_t start = millis();
+  uint32_t start  = millis();
+  uint32_t start0 = start;      // overall deadline: a peer trickling one byte per
+                                // timeout could otherwise stretch this call forever
   while (got < n) {
+    if (millis() - start0 > 3 * timeoutMs) return false;
     int avail = _t.available();
     if (avail > 0) {
       int c = _t.read();
@@ -241,21 +244,24 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   memcpy(d + k, cip, cipLen); k += cipLen;
 
   size_t total = ENIP_HEADER_LEN + dataLen;
-  if (_t.write(pkt, total) != (int)total) return false;
+  if (_t.write(pkt, total) != (int)total) { end(); return false; }
 
+  //  From here on the stream may hold bytes of a reply we will not finish
+  //  reading. Every early return below drops the session: a desynchronised
+  //  session would hand the next call this reply's leftovers.
   // ---- read encapsulation header ----
   uint8_t hdr[ENIP_HEADER_LEN];
   //  A timed-out reply leaves the stream misaligned; the next reply would be
   //  parsed as this one's. Drop the session; the PLC thread reconnects
   //  through the probe.
   if (!readExact(hdr, ENIP_HEADER_LEN, PLC_IO_TIMEOUT_MS)) { end(); return false; }
-  if (get16(hdr + 0) != ENIP_CMD_SENDRRDATA) return false;
-  if (get32(hdr + 8) != 0) return false;           // encapsulation status
+  if (get16(hdr + 0) != ENIP_CMD_SENDRRDATA) { end(); return false; }
+  if (get32(hdr + 8) != 0) { end(); return false; }           // encapsulation status
   uint16_t bodyLen = get16(hdr + 2);
-  if (bodyLen < 4 + 2 + 2 + 4 + 4) return false;
+  if (bodyLen < 4 + 2 + 2 + 4 + 4) { end(); return false; }
 
   static uint8_t body[EIP_MAX_MSG];
-  if (bodyLen > sizeof(body)) return false;
+  if (bodyLen > sizeof(body)) { end(); return false; }
   //  A timed-out reply leaves the stream misaligned; the next reply would be
   //  parsed as this one's. Drop the session; the PLC thread reconnects
   //  through the probe.
@@ -266,7 +272,7 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   j += 4;                       // interface handle
   j += 2;                       // timeout
   uint16_t items = get16(body + j); j += 2;
-  if (items < 2) return false;
+  if (items < 2) { end(); return false; }
   // item0 (address)
   j += 2;                       // type
   uint16_t len0 = get16(body + j); j += 2;
@@ -274,8 +280,8 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   // item1 (data)
   uint16_t type1 = get16(body + j); j += 2;
   uint16_t len1  = get16(body + j); j += 2;
-  if (type1 != CPF_ITEM_UNCONNECTED_DATA) return false;
-  if (j + len1 > bodyLen || len1 > replyCap) return false;
+  if (type1 != CPF_ITEM_UNCONNECTED_DATA) { end(); return false; }
+  if (j + len1 > bodyLen || len1 > replyCap) { end(); return false; }
 
   memcpy(reply, body + j, len1);
   replyLen = len1;
