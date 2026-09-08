@@ -1,18 +1,25 @@
 // =====================================================================
-//  opta-gateway-mt -- the IP2 gateway on two threads. MAIN THREAD FILE.
+//  opta-gateway-mt -- the IP2 gateway on three threads. MAIN THREAD FILE.
 //
-//  This file is the cloud side. It owns ArduinoCloud.update() and every
-//  Cloud* property. The PLC side is plc_thread.h. The only thing they
-//  share is shared.h. See README.md and the design spec it points to.
+//  Main owns the web config page, the serial config protocol and the
+//  panel LEDs, and nothing that can block. The cloud side (every Cloud*
+//  property, ArduinoCloud.update()) is cloud_thread.h; the PLC side is
+//  plc_thread.h. The only thing they share is shared.h. See README.md
+//  and the design specs it points to.
 // =====================================================================
 #include "config.h"
+#include <mbed.h>
+#include "rtos/Mutex.h"
 
+//  Three threads share one serial port. rtos::Mutex is recursive, so a
+//  LOG inside a function called from a LOG argument cannot deadlock.
 #if ENABLE_SERIAL_DEBUG
-  #define LOG(...)    Serial.print(__VA_ARGS__)
-  #define LOGLN(...)  Serial.println(__VA_ARGS__)
+  static rtos::Mutex g_logMutex;
+  #define LOG(...)    do { g_logMutex.lock(); Serial.print(__VA_ARGS__);   g_logMutex.unlock(); } while (0)
+  #define LOGLN(...)  do { g_logMutex.lock(); Serial.println(__VA_ARGS__); g_logMutex.unlock(); } while (0)
 #else
-  #define LOG(...)
-  #define LOGLN(...)
+  #define LOG(...)    do {} while (0)
+  #define LOGLN(...)  do {} while (0)
 #endif
 
 #include <malloc.h>
@@ -31,6 +38,7 @@
 #include "plc_thread.h"
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
+#include "cloud_thread.h"
 static_assert(N_VALVE == 36 && N_STATE == 27 && N_ACTION == 15, "batch 1 sweep tables");
 static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
 static_assert(sizeof(PlcSnapshot) < 960, "snapshot grew past 960 B");
@@ -390,12 +398,12 @@ bool onOTARequestCallback() {
 
 // ---- panel LEDs: PLC session, cloud link, fault ---------------------------
 //  Fault = PLC disconnected, PLC thread stalled, or any PLC error flag.
-static void panelLeds(bool plcStalled) {
-  digitalWrite(LED_PLC,   (bool)plcConnected ? HIGH : LOW);
-  digitalWrite(LED_CLOUD, ArduinoCloud.connected() ? HIGH : LOW);
-  bool fault = !(bool)plcConnected || plcStalled
-            || (bool)pressError || (bool)tempError || (bool)genError;
-  digitalWrite(LED_FAULT, fault ? HIGH : LOW);
+//  Main owns the pins; the cloud thread decides the bits (shared.h).
+static void panelLeds() {
+  uint8_t b = g_ledBits;
+  digitalWrite(LED_PLC,   (b & LED_BIT_PLC)   ? HIGH : LOW);
+  digitalWrite(LED_CLOUD, (b & LED_BIT_CLOUD) ? HIGH : LOW);
+  digitalWrite(LED_FAULT, (b & LED_BIT_FAULT) ? HIGH : LOW);
 }
 
 static StackWatch s_mainStack;
@@ -479,90 +487,28 @@ void setup() {
   //  CIP client: the PLC thread does its own first connect, through the
   //  probe, on its own stack.
   plcThreadBegin();
-  wdFeederBegin();
+  cloudThreadBegin();
+  wdFeederBegin();                          // after both workers, so their first beats exist
 
   s_mainStack.begin();                      // LAST: paints below this frame
 }
+
+#define MAIN_PASS_SLEEP_MS 20
 
 void loop() {
   wdBeatMain();
   wdWhereMain(WD_AT_WEB);
   handleConfigClient();
   serialConfigPoll();
-
-  // ---- take the PLC snapshot, assign Cloud* once per PLC tick -------------
-  static uint32_t lastSeq = 0;
-  cloudSideConsume(lastSeq);
-  //  Not stalled before the PLC thread has published once: stampMs is 0
-  //  until then and would read as a minutes-old snapshot.
-  bool plcStalled = cloudSideHasSnapshot() && cloudSideSnapshotAgeMs() > 3 * SAMPLE_INTERVAL_MS;
-  if (plcStalled) {
-    static unsigned long lastWarn = 0;
-    if (millis() - lastWarn > 10000) {
-      lastWarn = millis();
-      char b[PlcSnapshot::LASTERR_CAP];
-      snprintf(b, sizeof b, "plc thread stalled %lus", (unsigned long)(cloudSideSnapshotAgeMs() / 1000));
-      lastError = String(b);
-      LOGLN(b);
-    }
-  }
-
-  // ---- cloud, gated only in the (WiFi up, cloud down) state ---------------
-  unsigned long cloudT0 = millis();
-  wdWhereMain(WD_AT_CLOUDPROBE);
-  bool runCloud = cloudUpdateAllowed(WiFi.status() == WL_CONNECTED,
-                                     ArduinoCloud.connected(), cloudT0);
-  wdWhereMain(WD_AT_CLOUD);
-  if (runCloud) ArduinoCloud.update();
-  cloudMs = (int)(millis() - cloudT0);
-#if WIFI_FORCE_SECURITY
-  wifiRescue(millis());
-#endif
   wdWhereMain(WD_AT_NONE);
 
   unsigned long now = millis();
-
-  // ---- panel LEDs, 3 s, regardless of serial debug -------------------------
   static unsigned long lastLed = 0;
   if (now - lastLed >= 3000) {
     lastLed = now;
-    panelLeds(plcStalled);
-  }
-
-  // ---- heartbeat, 3 s, serial only ----------------------------------------
-#if ENABLE_SERIAL_DEBUG
-  static unsigned long lastHb = 0;
-  if (now - lastHb >= 3000) {
-    lastHb = now;
-    LOG("[HB] wifi=");  LOG(WiFi.status() == WL_CONNECTED ? "up" : "down");
-    LOG(" cloud=");     LOG(ArduinoCloud.connected() ? "up" : "down");
-    LOG(" plc=");       LOG((bool)plcConnected ? "1" : "0");
-    LOG(" seqAge=");    LOG(cloudSideSnapshotAgeMs());
-    LOG(" cloudMs=");   LOG((int)cloudMs);
-    LOG(" eipMs=");     LOG((int)eipMs);
-    LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
-    LOG(" mainStk=");   LOG(s_mainStack.minFree());
-    LOG(" plcStk=");    LOG(cloudSidePlcStackFree());
-    LOG(" t1=");        LOG((float)t1HotTank);
-    LOG(" lvl=");       LOG((float)tankLevel);
-    LOGLN("");
-  }
-#endif
-
-  // ---- diagnostics, 30 s --------------------------------------------------
-  static unsigned long lastDiag = 0;
-  if (now - lastDiag >= DIAG_PUBLISH_MS) {
-    lastDiag = now;
-    struct mallinfo mi = mallinfo();
-    heapUsed = (int)mi.uordblks;
-    heapFree = (int)mi.fordblks;
-    uptimeS  = (int)(now / 1000UL);
+    panelLeds();
     s_mainStack.sample();
-    stackFree   = (int)s_mainStack.minFree();
-    loopStallMs = (int)wdStallMax();
-    stallWhere  = (int)wdStallWhere();
-    wifiRssi    = (int)WiFi.RSSI();
+    cloudThreadReportMainStack(s_mainStack.minFree());
   }
-
-  loopMs = (int)(millis() - now);
+  rtos::ThisThread::sleep_for(std::chrono::milliseconds(MAIN_PASS_SLEEP_MS));
 }
