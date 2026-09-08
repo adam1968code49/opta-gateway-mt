@@ -26,7 +26,7 @@
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
 
-#define CLOUD_THREAD_STACK   16384
+#define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
 
 #if WIFI_FORCE_SECURITY
@@ -70,6 +70,7 @@ static void cloudThreadBody() {
     if (runCloud) ArduinoCloud.update();
     cloudMs = (int)(millis() - cloudT0);
 #if WIFI_FORCE_SECURITY
+    wdWhereCloud(WD_AT_WIFI);          // its WiFi.begin() is the same road as 14
     wifiRescue(millis());
 #endif
     wdWhereCloud(WD_AT_NONE);

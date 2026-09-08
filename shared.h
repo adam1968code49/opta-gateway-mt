@@ -160,7 +160,7 @@ static inline void sharedPublish(PlcSnapshot& working) {
   g_shareMutex.unlock();
 }
 
-//  main only. Copies published into out. Returns true if seq advanced
+//  cloud thread only (was main before batch 6). Copies published into out. Returns true if seq advanced
 //  since lastSeq, and updates lastSeq -- so main assigns Cloud* once per
 //  PLC tick, not once per 100 ms pass.
 static inline bool sharedTake(PlcSnapshot& out, uint32_t& lastSeq) {
@@ -184,7 +184,7 @@ static inline void sharedCtrlRead(CtrlState& out) {
   g_shareMutex.unlock();
 }
 
-//  main only. Non-blocking: a full queue drops the command and counts it.
+//  cloud thread only (was main before batch 6). Non-blocking: a full queue drops the command and counts it.
 //  Main must never wait on the PLC thread.
 static inline bool sharedCmdPost(const Cmd& c) {
   Cmd* slot = g_cmdQueue.try_alloc();

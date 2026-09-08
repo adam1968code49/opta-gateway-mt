@@ -2,7 +2,7 @@
 #define CLOUD_SIDE_H
 
 // =====================================================================
-//  MAIN THREAD ONLY. The one place Cloud* properties are assigned from
+//  CLOUD THREAD ONLY (batch 6; was main). The one place Cloud* properties are assigned from
 //  PLC data. Takes the published snapshot and, when its seq has advanced,
 //  copies each slot into its Cloud* -- skipping slots the PLC thread did
 //  not read this tick, so a stale property keeps its last real value

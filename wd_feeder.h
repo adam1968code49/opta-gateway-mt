@@ -10,8 +10,10 @@
 //  and plc 60 s (their I/O is bounded), cloud 300 s (a TLS stall on a bad
 //  uplink is a gap in telemetry, not a reason to reboot the gateway; only
 //  a cloud thread that never comes back is). Over budget the feeder stops
-//  kicking and the hardware resets the board -- but first it writes a
-//  KVStore marker so the next bootReason names the thread and section.
+//  kicking, writes a KVStore marker so the next bootReason names the
+//  thread and section, and resets the board itself (the cloud library
+//  also kicks the watchdog from inside update(), so merely stopping our
+//  kicks would not be enough while the cloud thread is healthy).
 //
 //  Two stall figures: the lifetime maximum (serial), and a 10-minute
 //  sliding window maximum (published), so a 6 s boot connect does not pin
@@ -132,6 +134,12 @@ static void wdFeederLoop() {
       snprintf(tag, sizeof tag, "wd giveup @%u %s %lus", (unsigned)bWhere, bWho, (unsigned long)(bSince / 1000));
       LOG("[WD] "); LOGLN(tag);
       bootMarkIntentional(tag);
+      //  Reset ourselves. ArduinoIoTCloud kicks the hardware watchdog on
+      //  its own inside update() (ArduinoIoTCloudTCP.cpp watchdog_reset),
+      //  so with a healthy cloud thread "stop kicking and wait" would wait
+      //  forever. The marker is in QSPI; nothing else is worth saving.
+      delay(50);
+      NVIC_SystemReset();
     }
     s_wdRefusals++;
   }
