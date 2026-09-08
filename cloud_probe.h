@@ -73,6 +73,7 @@
 #ifndef CLOUD_PROBE_PERIOD_MS
 #define CLOUD_PROBE_PERIOD_MS  5000
 #endif
+#define CLOUD_DNS_NEG_CACHE_MS 60000   // after a failed lookup, do not ask again for this long
 
 static SocketAddress  s_brokerAddr;
 static bool           s_brokerResolved = false;
@@ -84,6 +85,8 @@ static uint32_t       s_cloudProbeFails = 0;
 inline uint32_t cloudProbeOks()   { return s_cloudProbeOks; }
 inline uint32_t cloudProbeFails() { return s_cloudProbeFails; }
 
+static unsigned long s_dnsFailMs = 0;   // 0 = no recent failure
+
 //  One bounded knock. False on DNS failure, refuse, timeout, or setup
 //  error -- see the fail-closed note above.
 static bool cloudProbeOnce() {
@@ -91,8 +94,13 @@ static bool cloudProbeOnce() {
   if (net == nullptr) return false;
 
   if (!s_brokerResolved) {
+    //  A failed lookup costs mbed's 5 s x 3 retries. Remember the failure
+    //  and answer "unreachable" from memory for a minute instead of
+    //  paying it again every knock while the uplink is down.
+    if (s_dnsFailMs != 0 && millis() - s_dnsFailMs < CLOUD_DNS_NEG_CACHE_MS) return false;
     SocketAddress a;
-    if (net->gethostbyname(CLOUD_PROBE_HOST, &a) != NSAPI_ERROR_OK) return false;
+    if (net->gethostbyname(CLOUD_PROBE_HOST, &a) != NSAPI_ERROR_OK) { s_dnsFailMs = millis(); return false; }
+    s_dnsFailMs = 0;
     a.set_port(CLOUD_PROBE_PORT);
     s_brokerAddr = a;
     s_brokerResolved = true;
