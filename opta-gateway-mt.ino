@@ -38,6 +38,7 @@ static_assert(DESORP_TIME_MIN_MIN == 5 && ADSORP_TIME_MIN_MIN == 5, "clamp floor
 static_assert(sizeof(TRIP_HIST_TAGS) / sizeof(TRIP_HIST_TAGS[0]) == TRIP_HIST_N, "five history tags, newest first");
 static_assert(N_HP_REAL == 29 && N_HP_BOOL == 11, "batch 5 heat-pump tables");
 static_assert(sizeof(PlcSnapshot().hpReal) == N_HP_REAL * sizeof(float), "batch 5 snapshot");
+static_assert(WD_AT_WIFI == 14 && WD_AT_CLOUDCONN == 15 && WD_CLOUD_GIVEUP_MS == 300000, "batch 6 feeder");
 
 // ---- the CIP client: DEFINED here, USED only by the PLC thread ----------
 EthernetClient   plcTransport;
