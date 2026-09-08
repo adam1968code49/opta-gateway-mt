@@ -117,10 +117,19 @@ static void wdFeederLoop() {
     }
     //  Give up. Say why, once, where the next boot will find it; the
     //  hardware resets the board within 32.76 s of the last kick.
+    //  Blame the thread that is furthest past ITS OWN budget -- not the
+    //  largest absolute stall: a cloud thread 250 s into a legal 300 s
+    //  reconnect must not take the name of a main thread wedged at 61 s.
     if (!s_markerDone) {
       s_markerDone = true;
+      uint32_t rMain  = sinceMain  / (WD_STALL_GIVEUP_MS / 1000);   // per-mille-ish ratio, integer
+      uint32_t rPlc   = sincePlc   / (WD_STALL_GIVEUP_MS / 1000);
+      uint32_t rCloud = sinceCloud / (WD_CLOUD_GIVEUP_MS / 1000);
+      uint32_t bSince = sinceMain;  uint8_t bWhere = s_whereMain;  const char* bWho = "main";  uint32_t r = rMain;
+      if (rPlc   > r) { bSince = sincePlc;   bWhere = s_wherePlc;   bWho = "plc";   r = rPlc;   }
+      if (rCloud > r) { bSince = sinceCloud; bWhere = s_whereCloud; bWho = "cloud"; }
       char tag[48];
-      snprintf(tag, sizeof tag, "wd giveup @%u %s %lus", (unsigned)where, who, (unsigned long)(since / 1000));
+      snprintf(tag, sizeof tag, "wd giveup @%u %s %lus", (unsigned)bWhere, bWho, (unsigned long)(bSince / 1000));
       LOG("[WD] "); LOGLN(tag);
       bootMarkIntentional(tag);
     }

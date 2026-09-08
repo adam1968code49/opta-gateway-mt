@@ -162,7 +162,7 @@ inline void bootMarkIntentional(const char* tag);
 #endif
 #if BOOT_FAULT_HOOK
 extern "C" void mbed_error_hook(const mbed_error_ctx* ctx) {
-  char tag[24];
+  char tag[48]   /* wd_feeder writes up to 25 bytes */;
   snprintf(tag, sizeof(tag), "fault-%04X@%lX",
            (unsigned)(ctx ? (ctx->error_status & 0xFFFF) : 0),
            (unsigned long)(ctx ? ctx->error_address : 0));
@@ -269,7 +269,7 @@ inline void bootReasonCapture() {
   //  the marker knows. When the marker is absent on a software reset the
   //  string stays "software", which is exactly the alarming case -- it
   //  means NVIC_SystemReset() ran on a path we did not mark.
-  char tag[24] = {0};
+  char tag[48]   /* wd_feeder writes up to 25 bytes */ = {0};
   KVStore kv;
   if (kv.begin()) {
     if (kv.exists(BOOT_WHY_KEY)) {
