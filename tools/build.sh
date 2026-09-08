@@ -2,6 +2,10 @@
 # Generate version.h from git, then build. This is the ONLY supported build
 # entry point: building in the Arduino IDE skips version generation, and a
 # firmware with no version is exactly the blind spot OTA cannot tolerate.
+#
+# Warnings are on (--warnings default) and any warning that points into
+# THIS sketch's own files fails the build. Library warnings are reported
+# but do not fail it: we cannot fix those here.
 set -euo pipefail
 SKETCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VER="$(git -C "$SKETCH_DIR" describe --tags --always --dirty 2>/dev/null || echo unknown)"
@@ -11,4 +15,12 @@ cat > "$SKETCH_DIR/version.h" <<EOF
 #define FW_VERSION "$VER"
 EOF
 echo "FW_VERSION = $VER"
-arduino-cli compile --fqbn arduino:mbed_opta:opta "$SKETCH_DIR" "$@"
+LOG="$(mktemp)"
+set +e
+arduino-cli compile --fqbn arduino:mbed_opta:opta --warnings default "$SKETCH_DIR" "$@" 2>&1 | tee "$LOG"
+RC=${PIPESTATUS[0]}
+set -e
+OWN=$(grep -E "opta-gateway-mt[/\\][^:]*:[0-9]+:[0-9]+: warning" "$LOG" | grep -v "/libraries/" | wc -l | tr -d ' ')
+rm -f "$LOG"
+if [ "$RC" -ne 0 ]; then exit "$RC"; fi
+if [ "$OWN" -ne 0 ]; then echo "error: $OWN warning(s) in sketch files (see above)"; exit 2; fi

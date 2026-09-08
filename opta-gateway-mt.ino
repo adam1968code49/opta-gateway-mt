@@ -219,7 +219,7 @@ static void sendConfigPage(EthernetClient& c, const char* msg) {
 
 // Non-blocking-ish: only does work when a browser is connected.
 static void handleConfigClient() {
-  EthernetClient client = cfgServer.available();
+  EthernetClient client = cfgServer.accept();
   if (!client) return;
 
   char line[256], method[8] = {0}, path[64] = {0};

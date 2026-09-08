@@ -91,9 +91,9 @@ static void wdFeederLoop() {
     uint32_t sinceCloud = now - s_cloudBeatMs;
 
     //  The worst of the three, blamed on the thread whose beat is oldest.
-    uint32_t since = sinceMain;  uint8_t where = s_whereMain;  const char* who = "main";
-    if (sincePlc   > since) { since = sincePlc;   where = s_wherePlc;   who = "plc";   }
-    if (sinceCloud > since) { since = sinceCloud; where = s_whereCloud; who = "cloud"; }
+    uint32_t since = sinceMain;  uint8_t where = s_whereMain;
+    if (sincePlc   > since) { since = sincePlc;   where = s_wherePlc;   }
+    if (sinceCloud > since) { since = sinceCloud; where = s_whereCloud; }
 
     if (since > s_stallMaxMs) { s_stallMaxMs = since; s_stallWhere = where; }
 
