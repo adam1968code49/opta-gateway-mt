@@ -35,3 +35,9 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   hpDataStale false, HP_In analogs refreshing), plcReadFails 0. Boot counter n=41 -> 42.
   NOTE: batch 2 (n=40 at 04:57) had restarted once before this OTA (n=41 seen at 07:42);
   cause not yet attributed. Soak baseline for batch 5: n=42.
+
+- 2026-09-08 12:19 PT batch 6 on IP2 via OTA, fw f22d58e: cloud thread live (stackFree=18136 of 24576 at boot,
+  cloudMs/loopMs 0), three-budget feeder (main/plc 60 s, cloud 300 s) with give-up marker + self-reset,
+  stallWhere 14 at boot (WiFi association phase), plcReadFails 0, hpDataStale false. Boot counter n=47 -> 50:
+  the board was offline 11:48-12:19 PT on batch 5 (cause unknown, three restarts while unreachable); the
+  pending OTA applied on reconnect. wifiRssi now -26 dBm (was -78..-82 for three days). Soak baseline n=50.
