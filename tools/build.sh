@@ -19,8 +19,11 @@ LOG="$(mktemp)"
 set +e
 arduino-cli compile --fqbn arduino:mbed_opta:opta --warnings default "$SKETCH_DIR" "$@" 2>&1 | tee "$LOG"
 RC=${PIPESTATUS[0]}
+#  Count warnings that point into this sketch's own files. grep exits 1 when
+#  nothing matches -- the GREEN case -- so this stays outside `set -e`, or
+#  the script would die with status 1 exactly when the build is clean.
+OWN=$(grep -E 'opta-gateway-mt[/\\][^:]*:[0-9]+:[0-9]+: warning' "$LOG" | grep -v '/libraries/' | wc -l | tr -d ' ')
 set -e
-OWN=$(grep -E "opta-gateway-mt[/\\][^:]*:[0-9]+:[0-9]+: warning" "$LOG" | grep -v "/libraries/" | wc -l | tr -d ' ')
 rm -f "$LOG"
 if [ "$RC" -ne 0 ]; then exit "$RC"; fi
 if [ "$OWN" -ne 0 ]; then echo "error: $OWN warning(s) in sketch files (see above)"; exit 2; fi
