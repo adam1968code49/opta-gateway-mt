@@ -1,4 +1,3 @@
-#pragma once
 // =====================================================================
 //  boot_reason.h  --  why did the gateway restart?
 //
