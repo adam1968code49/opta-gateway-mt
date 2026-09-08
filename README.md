@@ -42,3 +42,7 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   the board was offline 11:48-12:19 PT while Adam switched its WiFi over serial from the office AP to the
   Starlink router (three restarts from the clear/reconfigure, not faults); the pending OTA applied on
   reconnect. wifiRssi now -26 dBm (Starlink router beside the board; was -78..-82 on the office AP). Soak baseline n=50.
+- 2026-09-08 14:28 PT batch 6.1 on IP2 via OTA, fw 95684a6: probe address expiry + re-resolve, fail-open after 60 s,
+  WiFi-up-cloud-down 15 min marked reset (waits for waterOwedL==0, 20 min cap), where-codes 16/17, probe counters
+  in [HB]. Fixes the 12:34-14:09 outage (probe knocked a stale broker IP forever; update() never ran). n=51 -> 52.
+  Soak baseline n=52.
