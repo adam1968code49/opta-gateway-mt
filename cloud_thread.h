@@ -28,6 +28,7 @@
 
 #define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
+#define CLOUD_OFFLINE_RESET_MS 900000   // WiFi up but no cloud for this long -> a fresh boot re-resolves everything
 
 #if WIFI_FORCE_SECURITY
 static void wifiRescue(unsigned long now);   // defined later in the .ino
@@ -42,6 +43,7 @@ static void cloudThreadBody() {
   s_cloudStack.begin();          // shallowest point of this stack
   uint32_t      lastSeq  = 0;
   unsigned long lastWarn = 0, lastHb = 0, lastDiag = 0;
+  unsigned long cloudDownSince = 0;      // first pass that saw WiFi up + cloud down; 0 = not in that state
   LOGLN("[CLOUD] thread started");
 
   for (;;) {
@@ -69,11 +71,22 @@ static void cloudThreadBody() {
     wdWhereCloud(!wifiUp ? WD_AT_WIFI : (!cloudUp ? WD_AT_CLOUDCONN : WD_AT_CLOUD));
     if (runCloud) ArduinoCloud.update();
     cloudMs = (int)(millis() - cloudT0);
+    //  Last resort against "alive but never reconnects": a quarter hour of
+    //  WiFi up and cloud down ends in a marked reset. Not when WiFi itself
+    //  is down -- a reboot would not bring an access point back.
+    if (cloudUp || !wifiUp)             cloudDownSince = 0;
+    else if (cloudDownSince == 0)       cloudDownSince = cloudT0;
+    else if (cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_MS) {
+      bootMarkIntentional("cloud offline 15min");
+      LOGLN("[CLOUD] WiFi up, cloud down for 15 min -- resetting");
+      delay(50);
+      NVIC_SystemReset();
+    }
 #if WIFI_FORCE_SECURITY
     wdWhereCloud(WD_AT_WIFI);          // its WiFi.begin() is the same road as 14
     wifiRescue(millis());
 #endif
-    wdWhereCloud(WD_AT_NONE);
+    wdWhereCloud(WD_AT_DIAG);          // heartbeat print and the 30 s block (WiFi.RSSI is a driver call)
 
     unsigned long now = millis();
 
@@ -96,6 +109,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens());
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());
@@ -119,6 +133,7 @@ static void cloudThreadBody() {
       wifiRssi    = (int)WiFi.RSSI();
     }
 
+    wdWhereCloud(WD_AT_NONE);
     loopMs = (int)(millis() - pass0);
     rtos::ThisThread::sleep_for(std::chrono::milliseconds(CLOUD_PASS_SLEEP_MS));
   }

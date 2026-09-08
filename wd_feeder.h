@@ -30,7 +30,7 @@
 #define WD_STALL_WINDOW_MS   600000    // published maximum looks back this far
 #define WD_FEEDER_STACK      6144      // bootMarkIntentional goes through KVStore/QSPI
 
-//  Where each thread is. 1 main; 2,4,12,14,15 cloud; 5-11,13 plc.
+//  Where each thread is. 1 main; 2,4,12,14,15,16 cloud; 5-11,13 plc.
 #define WD_AT_NONE       0
 #define WD_AT_WEB        1    // handleConfigClient()          main
 #define WD_AT_CLOUD      2    // ArduinoCloud.update(), connected   cloud
@@ -47,6 +47,7 @@
 #define WD_AT_PLCPUBLISH 13   // sharedPublish()               plc
 #define WD_AT_WIFI       14   // update() with WiFi down: re-association   cloud
 #define WD_AT_CLOUDCONN  15   // update() WiFi up, cloud down: DNS/TLS/NTP  cloud
+#define WD_AT_DIAG       16   // heartbeat print + 30 s diagnostics (WiFi.RSSI)  cloud
 
 static volatile uint8_t  s_whereMain   = WD_AT_NONE;   // written by main only
 static volatile uint8_t  s_wherePlc    = WD_AT_NONE;   // written by plc only
