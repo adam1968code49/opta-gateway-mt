@@ -225,7 +225,7 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   //                 iface  to  cnt   item0(type+len)  item1(type+len+cip)
   // Static (not stacked): the gateway issues one request at a time.
   static uint8_t pkt[ENIP_HEADER_LEN + EIP_MAX_MSG];
-  if (ENIP_HEADER_LEN + dataLen > sizeof(pkt)) return false;
+  if ((size_t)ENIP_HEADER_LEN + dataLen > sizeof(pkt)) return false;
 
   memset(pkt, 0, ENIP_HEADER_LEN);
   put16(pkt + 0, ENIP_CMD_SENDRRDATA);
@@ -244,7 +244,7 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   memcpy(d + k, cip, cipLen); k += cipLen;
 
   size_t total = ENIP_HEADER_LEN + dataLen;
-  if (_t.write(pkt, total) != (int)total) { end(); return false; }
+  if (_t.write(pkt, total) != total) { end(); return false; }
 
   //  From here on the stream may hold bytes of a reply we will not finish
   //  reading. Every early return below drops the session: a desynchronised
@@ -281,7 +281,9 @@ bool EtherNetIPClient::sendRRData(const uint8_t* cip, uint16_t cipLen,
   uint16_t type1 = get16(body + j); j += 2;
   uint16_t len1  = get16(body + j); j += 2;
   if (type1 != CPF_ITEM_UNCONNECTED_DATA) { end(); return false; }
-  if (j + len1 > bodyLen || len1 > replyCap) { end(); return false; }
+  //  The whole body is in hand here: a malformed item or a caller buffer
+  //  that is too small is not a stream desync, so the session survives.
+  if (j + len1 > bodyLen || len1 > replyCap) return false;
 
   memcpy(reply, body + j, len1);
   replyLen = len1;

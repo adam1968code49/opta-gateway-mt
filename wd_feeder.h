@@ -132,8 +132,8 @@ static void wdFeederLoop() {
       if (rCloud > r) { bSince = sinceCloud; bWhere = s_whereCloud; bWho = "cloud"; }
       char tag[48];
       snprintf(tag, sizeof tag, "wd giveup @%u %s %lus", (unsigned)bWhere, bWho, (unsigned long)(bSince / 1000));
+      bootMarkIntentional(tag);      // marker first: LOG takes g_logMutex, which the wedged thread may hold
       LOG("[WD] "); LOGLN(tag);
-      bootMarkIntentional(tag);
       //  Reset ourselves. ArduinoIoTCloud kicks the hardware watchdog on
       //  its own inside update() (ArduinoIoTCloudTCP.cpp watchdog_reset),
       //  so with a healthy cloud thread "stop kicking and wait" would wait
