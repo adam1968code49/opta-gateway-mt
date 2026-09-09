@@ -553,6 +553,30 @@
 #define TAG_PROD_FLOWRATE       "product_flowrate"     // REAL, L/min
 #define TAG_PROD_WATERVOLUME    "product_watervolume"  // REAL, liters
 #define TAG_CUMUL_VOL_RESET     "cumulative_watervolume_reset"  // BOOL, HMI reset
+
+// ---------------------------------------------------------------------
+//  FLOW WATCH -- did the water the tank lost actually pass the meter?
+// ---------------------------------------------------------------------
+//  2026-09-08: the hose from the condensate pump to the filter blew off
+//  under back-pressure three discharges in a row (15:35, 15:45, 15:55).
+//  The pump ran 20-30 s, the tank level fell 15-23 cm exactly as always,
+//  and the meter counted zero -- correctly, no water passed it. Nothing
+//  put those two facts together; the leak was found by the wet floor.
+//  After every discharge flow_watch.h compares the level drop with the
+//  metered litres and latches "flow mismatch" into lastError.
+//
+//  Measured basis (20 discharges, 2026-09-08 08:30-16:30, IP2):
+//    normal:  pump 17-34 s, level -14..-24 cm, meter 0.5-1.1 L, peak 1.5-1.9 L/min
+//    hose off: pump 20-30 s, level -15..-23 cm, meter 0 L
+//    half off (15:24): 0.3 L over -14.5 cm -- deliberately NOT flagged
+//  Pulses start 5-10 s after the pump, and the line keeps draining ~30 s
+//  after it stops, hence the settle time before judging.
+#define FLOW_WATCH_ENABLE         1           // 0 on a machine without this pump/meter layout (IP1)
+#define FLOW_WATCH_LEVEL_DROP_CM  8.0f        // normal minimum 14 cm: ~2x margin
+#define FLOW_WATCH_MIN_L          0.25f       // normal minimum 0.5 L, fault 0 L; 0.3 L half-fault passes
+#define FLOW_WATCH_SETTLE_MS      45000UL     // line drains ~30 s after the pump stops
+#define FLOW_WATCH_PUMP_MAX_MS    180000UL    // normal 17-34 s; longer = something else, give up
+#define FLOW_WATCH_LATCH_MS       3600000UL   // lastError holds the verdict 60 min, or until a good discharge
 //
 //  RUNNING TOTALS -- COMPUTED HERE, STORED IN THE PLC (changed 2026-08-27;
 //  the PLC used to compute these and the gateway only mirrored them).

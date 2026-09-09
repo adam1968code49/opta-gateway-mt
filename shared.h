@@ -86,6 +86,7 @@ struct PlcSnapshot {
   uint32_t hmiWriteCount;      // hourly HMI writes performed
   uint32_t plcTotalRestores;   // lifetime-total restores after a PLC download
   int32_t  desorpPreMinT11;    // Timer_11[3].PRE / 60000, 0 = not read (consistency check vs T6)
+  int32_t  flowMismatchCount;  // batch 7: discharges where the level dropped but the meter saw nothing
 
   // ---- heat pump through the PLC (batch 5, every 3rd tick, offset 1) ----
   //  Slot order == HP_REAL_TAGS / HP_BOOL_TAGS. Words (15..20) are REAL

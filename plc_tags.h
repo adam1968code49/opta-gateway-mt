@@ -114,6 +114,12 @@ static const char* const SENSOR_TAGS[] = {
 };
 #define N_SENSORS (sizeof(SENSOR_TAGS) / sizeof(SENSOR_TAGS[0]))
 
+//  Named slots that code other than the sweep/TAKE lists reads directly.
+//  flow_watch.h checks these against the tables at start-up (strcmp) and
+//  disables itself if they drift, so a reorder cannot silently watch the
+//  wrong tag.
+#define SSLOT_LEVEL   27      // SENSOR_TAGS[27] == TAG_LEVEL  (Collection_Tank_Level)
+
 // ---------------------------------------------------------------------
 //  IP2 sweep is split: 22 REAL points in one batched MSP call, 6 DINT raw
 //  counts read singly and scaled. Results are scattered back into their
@@ -192,6 +198,7 @@ static const char* const VALVE_TAGS[] = {
   TAG_ST_LOCKOUT, TAG_ST_PHASEFAULT, TAG_ST_BACNETCTL             // 33..35
 };
 #define N_VALVE (sizeof(VALVE_TAGS) / sizeof(VALVE_TAGS[0]))
+#define VSLOT_P_COND  11      // VALVE_TAGS[11] == TAG_P_COND  (Lefoo condensate pump)
 
 //  State sweep: 15 Action bits then 12 button/state/fan/door bits.
 //  plcActionWord bit N = Action_(N+1); plcStateWord bit order is FIXED

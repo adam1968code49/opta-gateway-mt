@@ -30,6 +30,11 @@ inline void flowInit() {
   s_flowLastMs = millis();
 }
 
+//  Raw ISR count, same single aligned 32-bit load flowTick() uses. For
+//  flow_watch.h, which meters one discharge by pulse delta and must not
+//  disturb flowTick()'s own s_flowLastCount bookkeeping.
+inline uint32_t flowPulses() { return s_flowPulses; }
+
 // ---- commit journal: litres measured but not yet in the PLC's total -----
 static float s_uncommittedL  = 0.0f;
 static bool  s_pendingCommit = false;
