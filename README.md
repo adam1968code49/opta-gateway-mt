@@ -48,6 +48,6 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   Soak baseline n=52.
 - 2026-09-08 18:06 PT batch 7 on IP2 via OTA, fw e463f5b: flow watch (level drop vs metered litres after each
   discharge, verdict latched into lastError; flowMis in [HB]). Boot n=52 -> 53, lastError ok, plcConnected true,
-  stackFree 18144, stallWhere 14 at boot, first post-boot discharge flowBatch 0.57 L. Note: the Influx bridge
-  stopped forwarding at 18:06 (Arduino Cloud API had everything); that is the PC-side forwarder, not the board.
+  stackFree 18144, stallWhere 14 at boot, first post-boot discharge flowBatch 0.57 L. Verified through the
+  Arduino Cloud API; the Influx bridge delivered the same rows a few minutes late.
   Soak baseline n=53. Serial to confirm on site: one `[FLOW] pump ..s level ..->.. meter ..mL ok` per discharge.
