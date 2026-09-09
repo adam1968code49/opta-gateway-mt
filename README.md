@@ -57,3 +57,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   stackFree 18128, stallWhere 14 at boot, wifiRssi -26. Verified through the Arduino Cloud API. Soak baseline n=55.
   Serial to confirm on site: `[HB] ... wr=0 off=0`; the 03:44-04:02 event of 2026-09-09 (`cloud offline 15min n=54`)
   is what this batch answers.
+- Batch 9 (evidence) -- pending OTA. No-SYNC guard (attached 6 min without SYNC -> one WiFi re-association);
+  ladder reset marker now `offline 60m p=oks/fails fo=N wr=N gw=ok|fail|na` (was `cloud offline ..min ...`);
+  plcFailTag names the first unread SENSOR tag first ('all sensors' when the whole sweep is unread; before
+  this batch it named status-sweep tags only -- semantic break in the history at this timestamp); `[HB] sync= nsk=`;
+  one boot-time gateway ping on serial. `nsk=0` does NOT mean the 2026-09-01 zero-report fault is fixed (see docs/batch9-final-review.md I-1).

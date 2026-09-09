@@ -89,7 +89,7 @@ CloudBool   stBACnetControl;        // unit is under BACnet control
 
 // ---- valve-sweep health ---------------------------------------------------
 CloudInt    plcReadFails;           // RO: failing tags in the status sweep
-CloudString plcFailTag;             // RO: first failing tag, "ok" when none
+CloudString plcFailTag;             // RO: first failing tag of the sensor or status sweep (sensor first), "ok" when none
 
 // ---- PLC state words and cycle timers -----------------------------------
 CloudInt    plcActionWord;    // bit N = Action_(N+1)

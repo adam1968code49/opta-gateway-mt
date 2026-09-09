@@ -74,6 +74,8 @@ inline void ctrlBegin() {
 }
 
 inline bool ctrlControlEnabled() { return s_ctrlLocal.controlEnabled; }
+inline bool          ctrlSyncSeen() { return s_syncSeen; }   // a SYNC since the last (dis)connect
+inline unsigned long ctrlSyncMs()   { return s_syncMs; }
 
 static bool ctrlQuiet() {
   return !s_syncSeen || (millis() - s_syncMs) < CTRL_SYNC_QUIET_MS;

@@ -105,6 +105,15 @@ static void pollSensorsInto(PlcSnapshot& w) {
   size_t good = 0;
   for (size_t k = 0; k < N_SENSORS; k++) if (w.ok[k]) good++;
   w.fails = (int32_t)N_SENSORS - (int32_t)good;
+  //  Name the first unread sensor tag. The PLC program is under active
+  //  change (2026-09); a renamed or retyped tag used to show up on the
+  //  dashboard only as "read fail x2", with no way to tell which.
+  const char* firstBadSensor = nullptr;
+  for (size_t k = 0; k < N_SENSORS; k++) if (!w.ok[k]) { firstBadSensor = SENSOR_TAGS[k]; break; }
+  //  All 28 unread is a session/download problem, not one tag: naming
+  //  Temp_1 there would be exactly the false precision this is meant to end.
+  snprintf(w.failTag, PlcSnapshot::FAILTAG_CAP, "%s",
+           w.fails >= (int32_t)N_SENSORS ? "all sensors" : (firstBadSensor ? firstBadSensor : "ok"));
   w.lastCipStatus = eip.lastCipStatus();
 
   static bool prevOk[N_SENSORS];
@@ -143,7 +152,8 @@ static void pollValvesInto(PlcSnapshot& w) {
   for (size_t k = 0; k < N_VALVE; k++)
     if (!w.valveOk[k]) { nfail++; if (!firstBad) firstBad = VALVE_TAGS[k]; }
   w.valveFails = nfail;
-  snprintf(w.failTag, PlcSnapshot::FAILTAG_CAP, "%s", firstBad ? firstBad : "ok");
+  if (strcmp(w.failTag, "ok") == 0)             // a sensor failure named this tick keeps the slot
+    snprintf(w.failTag, PlcSnapshot::FAILTAG_CAP, "%s", firstBad ? firstBad : "ok");
 }
 
 // ---------------------------------------------------------------------

@@ -23,9 +23,9 @@
 #include "stack_watch.h"
 #include "wd_feeder.h"
 #include "cloud_probe.h"
-#include "cloud_ladder.h"
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
+#include "cloud_ladder.h"      // after cloud_ctrl.h: the no-SYNC guard reads ctrlSyncSeen()
 
 #define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
@@ -102,7 +102,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
-      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now));
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now)); LOG(" sync="); LOG(ctrlSyncSeen() ? (long)((now - ctrlSyncMs()) / 1000UL) : -1L); LOG(" nsk="); LOG(cloudNoSyncKicks());
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());

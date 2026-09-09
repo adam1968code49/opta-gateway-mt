@@ -40,6 +40,7 @@
 #include "shared.h"
 #include "wd_feeder.h"
 #include "cloud_probe.h"
+#include "cloud_ctrl.h"        // ctrlSyncSeen()/ctrlSyncMs() for the no-SYNC guard
 
 #define CLOUD_LADDER_WIFI_SETTLE_MS     120000UL   // no rung acts until WiFi has been up this long
 #define CLOUD_LADDER_REASSOC1_MS        300000UL   // 5 min offline  -> first WiFi.disconnect()
@@ -48,6 +49,8 @@
 #define CLOUD_LADDER_PROBE_WINDOW_MS    600000UL   // "recently" = a probe success within this
 #define CLOUD_LADDER_RESET_CEILING_MS   3600000UL  // 60 min         -> reset regardless (the probe itself may be wrong)
 #define CLOUD_LADDER_LEDGER_GRACE_MS    300000UL   // a reset rung waits for waterOwedL == 0 at most this long
+#define CLOUD_LADDER_NOSYNC_MS          360000UL   // attached this long with no SYNC -> drop the association once
+#define CLOUD_LADDER_GW_PING_MS         1000UL     // gateway ping timeout when writing the marker
 
 static unsigned long s_ldOfflineSince  = 0;   // first pass that saw cloud down; 0 = cloud up
 static unsigned long s_ldWifiUpSince   = 0;   // first pass that saw WiFi up;   0 = WiFi down
@@ -55,8 +58,20 @@ static unsigned long s_ldResetArmedAt  = 0;   // a reset rung's condition first 
 static uint8_t       s_ldReassocDone   = 0;   // re-associations this episode (0..2)
 static uint32_t      s_ldReassocTotal  = 0;   // since boot, for [HB]
 static uint32_t      s_ldOks0 = 0, s_ldFails0 = 0, s_ldFailOpens0 = 0;   // probe counters when the episode began
+static unsigned long s_ldCloudUpSince  = 0;   // first pass that saw connected() true; 0 = down
+static bool          s_ldNoSyncKicked  = false;  // one kick per connection
+static uint32_t      s_ldNoSyncKicks   = 0;   // since boot, for [HB]
+static bool          s_ldSyncWasSeen   = false;  // ctrlSyncSeen() last pass: a true->false edge restarts the 6 min
+static bool          s_ldGwPingDone    = false;  // one boot-time gateway ping, so the instrument is proven to speak
 
-inline uint32_t cloudReassocs() { return s_ldReassocTotal; }
+//  One ICMP echo to the router. Returns the RTT in ms, negative on failure.
+//  Bounded by CLOUD_LADDER_GW_PING_MS; caller sets the where-code.
+static int cloudLadderGwPing() {
+  return WiFi.ping(WiFi.gatewayIP(), 255, CLOUD_LADDER_GW_PING_MS);
+}
+
+inline uint32_t cloudReassocs()    { return s_ldReassocTotal; }
+inline uint32_t cloudNoSyncKicks() { return s_ldNoSyncKicks; }
 inline uint32_t cloudOfflineMin(unsigned long now) {
   return s_ldOfflineSince ? (uint32_t)((now - s_ldOfflineSince) / 60000UL) : 0;
 }
@@ -81,14 +96,48 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
   else if (s_ldWifiUpSince == 0)  s_ldWifiUpSince = now;
 
   if (cloudUp) {
+    if (s_ldCloudUpSince == 0) { s_ldCloudUpSince = now; s_ldNoSyncKicked = false; }
     if (s_ldOfflineSince != 0) {
       LOG("[CLOUD] back after "); LOG((now - s_ldOfflineSince) / 60000UL);
       LOG(" min: p="); LOG(cloudProbeOks() - s_ldOks0); LOG("/"); LOG(cloudProbeFails() - s_ldFails0);
       LOG(" fo="); LOG(cloudFailOpens() - s_ldFailOpens0); LOG(" wr="); LOGLN(s_ldReassocDone);
     }
     s_ldOfflineSince = 0; s_ldResetArmedAt = 0; s_ldReassocDone = 0;
+
+    //  Prove the gateway-ping instrument once per boot, on the serial
+    //  log, so a `gw=fail` in a marker months from now can be trusted.
+    if (!s_ldGwPingDone) {
+      s_ldGwPingDone = true;
+      wdWhereCloud(WD_AT_WIFI);
+      int rtt = cloudLadderGwPing();
+      LOG("[CLOUD] gateway "); LOG(WiFi.gatewayIP()); LOG(" ping ");
+      if (rtt >= 0) { LOG(rtt); LOGLN(" ms"); } else LOGLN("FAILED (router does not answer ICMP?)");
+    }
+
+    //  The library can also drop s_syncSeen while MQTT stays up (a thing
+    //  detach/re-attach fires DISCONNECT without a connection loss). That
+    //  edge starts a new 6 min, otherwise the guard would fire at once and
+    //  log a "connected N min without SYNC" that never happened.
+    bool syncNow = ctrlSyncSeen();
+    if (s_ldSyncWasSeen && !syncNow) s_ldCloudUpSince = now;
+    s_ldSyncWasSeen = syncNow;
+
+    //  Attached but never synced. Properties go out at QoS 0, so this is
+    //  the one application-level witness the device has: the cloud's
+    //  last-values reply never arrived. The library's own give-up is 30 s
+    //  x 10; past that, drop the association once and let it start over.
+    if (!syncNow && !s_ldNoSyncKicked && now - s_ldCloudUpSince >= CLOUD_LADDER_NOSYNC_MS) {
+      s_ldNoSyncKicked = true;
+      s_ldNoSyncKicks++;
+      wdWhereCloud(WD_AT_WIFI);
+      LOG("[CLOUD] connected "); LOG((now - s_ldCloudUpSince) / 60000UL);
+      LOGLN(" min without SYNC: re-associating (WiFi.disconnect)");
+      WiFi.disconnect();
+    }
     return;
   }
+  s_ldCloudUpSince = 0;
+  s_ldSyncWasSeen  = false;
   if (s_ldOfflineSince == 0) {                 // episode begins: baseline the evidence counters
     s_ldOfflineSince = now;
     s_ldOks0 = cloudProbeOks(); s_ldFails0 = cloudProbeFails(); s_ldFailOpens0 = cloudFailOpens();
@@ -128,11 +177,19 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
   //  water -- one discharge is 500-1100 mL.
   if (fabsf(owedL) >= 0.01f && now - s_ldResetArmedAt < CLOUD_LADDER_LEDGER_GRACE_MS) return;
 
+  //  Is the router itself answering? Distinguishes "the uplink is down"
+  //  (gw=ok, p=0) from "the router is wedged" (gw=fail): the second one
+  //  is fixed by power-cycling the router, not by anything on this board.
+  const char* gw = "na";
+  if (WiFi.status() == WL_CONNECTED) {
+    wdWhereCloud(WD_AT_WIFI);
+    gw = cloudLadderGwPing() >= 0 ? "ok" : "fail";
+  }
   char tag[48];                                // bootMarkIntentional's own buffer is 48
-  snprintf(tag, sizeof tag, "cloud offline %lumin p=%lu/%lu fo=%lu wr=%u",
+  snprintf(tag, sizeof tag, "offline %lum p=%lu/%lu fo=%lu wr=%u gw=%s",   // <= 43 chars
            off / 60000UL,
            (unsigned long)(cloudProbeOks() - s_ldOks0), (unsigned long)(cloudProbeFails() - s_ldFails0),
-           (unsigned long)(cloudFailOpens() - s_ldFailOpens0), (unsigned)s_ldReassocDone);
+           (unsigned long)(cloudFailOpens() - s_ldFailOpens0), (unsigned)s_ldReassocDone, gw);
   //  No LOG here: the marker is the record, and a blocked serial port must
   //  not delay the reset.
   bootMarkIntentional(tag);
