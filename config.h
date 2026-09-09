@@ -575,6 +575,9 @@
 #define FLOW_WATCH_LEVEL_DROP_CM  8.0f        // normal minimum 14 cm: ~2x margin
 #define FLOW_WATCH_MIN_L          0.25f       // normal minimum 0.5 L, fault 0 L; 0.3 L half-fault passes
 #define FLOW_WATCH_SETTLE_MS      45000UL     // line drains ~30 s after the pump stops
+#define FLOW_WATCH_PUMP_MIN_MS    10000UL     // shorter = a jog, not a discharge: not judged. Also the only
+                                              // defence against a level spike (56/72/102 cm seen just before
+                                              // the pump) landing on the start tick and faking a drop
 #define FLOW_WATCH_PUMP_MAX_MS    180000UL    // normal 17-34 s; longer = something else, give up
 #define FLOW_WATCH_LATCH_MS       3600000UL   // lastError holds the verdict 60 min, or until a good discharge
 //

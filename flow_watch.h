@@ -62,11 +62,28 @@ static void flowWatchAbort(const char* why) {
   s_fwState = FW_IDLE;
 }
 
+//  The latch owns the text it wrote: whoever ends the latch takes the text
+//  back out of w.lastError if it is still there. Without this a PLC
+//  outage -- during which nothing else rewrites lastError -- would leave
+//  "flow mismatch" showing long after the 60 min, and label the outage
+//  as a flow fault.
+static void flowWatchRelease(PlcSnapshot& w) {
+  s_fwLatched = false;
+  if (strcmp(w.lastError, s_fwText) == 0)
+    snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "ok");
+}
+
 //  One finished discharge: judge it, log it, latch or release.
 static void flowWatchJudge(PlcSnapshot& w, unsigned long now) {
   float dropCm = s_fwLevelStart - w.sensor[SSLOT_LEVEL];
   float litres = (float)(flowPulses() - s_fwPulsesStart) / (FLOW_K_HZ_PER_LPM * 60.0f);
-  unsigned long pumpS = (s_fwPumpOffMs - s_fwStartMs) / 1000UL;
+  unsigned long pumpMs = s_fwPumpOffMs - s_fwStartMs;
+  unsigned long pumpS  = pumpMs / 1000UL;
+  if (dropCm != dropCm) { LOGLN("[FLOW] level NaN, not judged"); return; }   // PLC REAL can carry NaN
+  if (pumpMs < FLOW_WATCH_PUMP_MIN_MS) {
+    LOG("[FLOW] pump "); LOG(pumpS); LOGLN("s: a jog, not judged");
+    return;
+  }
   bool mismatch = dropCm >= FLOW_WATCH_LEVEL_DROP_CM && litres < FLOW_WATCH_MIN_L;
 
   long dropCmI = (long)(dropCm + (dropCm >= 0.0f ? 0.5f : -0.5f));   // no %f: newlib-nano
@@ -82,8 +99,8 @@ static void flowWatchJudge(PlcSnapshot& w, unsigned long now) {
     s_fwLatchUntil = now + FLOW_WATCH_LATCH_MS;
     snprintf(s_fwText, sizeof s_fwText, "flow mismatch: lvl -%ldcm meter %ldmL x%ld",
              dropCmI, mL, (long)s_fwCount);
-  } else if (dropCm >= FLOW_WATCH_LEVEL_DROP_CM) {
-    s_fwLatched = false;                      // a real discharge went past the meter: fault cleared
+  } else if (dropCm >= FLOW_WATCH_LEVEL_DROP_CM && s_fwLatched) {
+    flowWatchRelease(w);                      // a real discharge went past the meter: fault cleared
   }
   //  A drop under the threshold judges nothing: the pump moved no water
   //  worth speaking of, so it neither raises nor clears a latch.
@@ -94,7 +111,7 @@ static void flowWatchJudge(PlcSnapshot& w, unsigned long now) {
 //  disconnected tick arrives with both ok[] arrays cleared.
 static void flowWatchTick(PlcSnapshot& w) {
   SHARED_ASSERT_ON_PLC();
-  w.flowMismatchCount = s_fwCount;
+  w.flowMismatchCount = s_fwCount;            // published even when the watch is disabled
   if (!s_fwEnabled) return;
   unsigned long now = millis();
 
@@ -103,7 +120,8 @@ static void flowWatchTick(PlcSnapshot& w) {
 
   switch (s_fwState) {
     case FW_IDLE:
-      if (pumpOk && s_fwPrevValid && !s_fwPrevPump && pump && w.ok[SSLOT_LEVEL]) {
+      if (s_fwPrevValid && !s_fwPrevPump && pump) {
+        if (!w.ok[SSLOT_LEVEL]) { LOGLN("[FLOW] start skipped (level unread)"); break; }
         s_fwStartMs     = now;
         s_fwLevelStart  = w.sensor[SSLOT_LEVEL];
         s_fwPulsesStart = flowPulses();
@@ -134,11 +152,11 @@ static void flowWatchTick(PlcSnapshot& w) {
   //  Overlay. Real errors (read fail, control refusal, probe) are not
   //  "ok" and win; the verdict shows only in the gaps between them.
   if (s_fwLatched) {
-    if ((long)(now - s_fwLatchUntil) >= 0) s_fwLatched = false;
+    if ((long)(now - s_fwLatchUntil) >= 0) flowWatchRelease(w);
     else if (strcmp(w.lastError, "ok") == 0)
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s", s_fwText);
   }
-  w.flowMismatchCount = s_fwCount;
+  w.flowMismatchCount = s_fwCount;            // again: judge() may have bumped it this tick
 }
 
 #endif // FLOW_WATCH_H
