@@ -118,6 +118,7 @@ static void cloudThreadBody() {
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());
+      LOG(" flowMis=");   LOG(cloudSideFlowMismatchCount());
       LOG(" t1=");        LOG((float)t1HotTank);
       LOG(" lvl=");       LOG((float)tankLevel);
       LOGLN("");

@@ -46,3 +46,5 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   WiFi-up-cloud-down 15 min marked reset (waits for waterOwedL==0, 20 min cap), where-codes 16/17, probe counters
   in [HB]. Fixes the 12:34-14:09 outage (probe knocked a stale broker IP forever; update() never ran). n=51 -> 52.
   Soak baseline n=52.
+- Batch 7 (flow watch) -- pending OTA. Build: tools/build.sh clean, warning gate green. Expect on serial: one
+  `[FLOW] pump ..s level ..->.. meter ..mL ok` per discharge; `[HB] ... flowMis=0`.
