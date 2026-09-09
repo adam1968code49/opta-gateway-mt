@@ -26,6 +26,7 @@
 #include "stack_watch.h"
 #include "wd_feeder.h"
 #include "flow_meter.h"
+#include "flow_watch.h"
 
 #define PLC_THREAD_STACK   16384
 #define STATE_EVERY_TICKS  3          // 6 s at SAMPLE_INTERVAL_MS 2000
@@ -392,6 +393,7 @@ static void plcThreadBody() {
   unsigned long lastReconnect = 0;
   uint32_t tickN = 0;
   LOGLN("[PLC] thread started");
+  flowWatchInit();
 
   for (;;) {
     unsigned long tick0 = millis();
@@ -455,6 +457,8 @@ static void plcThreadBody() {
     s_plcStack.sample();
     w.plcStackFree = s_plcStack.minFree();
     w.cmdDropped   = g_cmdDropped;
+
+    flowWatchTick(w);                         // batch 7: judge the finished discharge, overlay lastError
 
     wdWherePlc(WD_AT_PLCPUBLISH);
     sharedPublish(w);
