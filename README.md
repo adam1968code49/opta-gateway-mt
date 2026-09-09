@@ -51,3 +51,6 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   stackFree 18144, stallWhere 14 at boot, first post-boot discharge flowBatch 0.57 L. Verified through the
   Arduino Cloud API; the Influx bridge delivered the same rows a few minutes late.
   Soak baseline n=53. Serial to confirm on site: one `[FLOW] pump ..s level ..->.. meter ..mL ok` per discharge.
+- Batch 8 (cloud ladder) -- pending OTA. Replaces the flat 15 min offline reset: WiFi re-association at 5/15 min,
+  marked reset at 20 min only when the probe still reaches the broker port, 60 min regardless; marker carries
+  `p=oks/fails fo=N wr=N`. Expect `[HB] ... wr=0 off=0`.

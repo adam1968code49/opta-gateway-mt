@@ -23,13 +23,12 @@
 #include "stack_watch.h"
 #include "wd_feeder.h"
 #include "cloud_probe.h"
+#include "cloud_ladder.h"
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
 
 #define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
-#define CLOUD_OFFLINE_RESET_MS      900000    // WiFi up but no cloud for this long -> a fresh boot re-resolves everything...
-#define CLOUD_OFFLINE_RESET_HARD_MS 1200000   // ...waiting for the water ledger to be flat, but no longer than this
 
 #if WIFI_FORCE_SECURITY
 static void wifiRescue(unsigned long now);   // defined later in the .ino
@@ -44,7 +43,6 @@ static void cloudThreadBody() {
   s_cloudStack.begin();          // shallowest point of this stack
   uint32_t      lastSeq  = 0;
   unsigned long lastWarn = 0, lastHb = 0, lastDiag = 0;
-  unsigned long cloudDownSince = 0;      // first pass that saw WiFi up + cloud down; 0 = not in that state
   LOGLN("[CLOUD] thread started");
 
   for (;;) {
@@ -73,20 +71,10 @@ static void cloudThreadBody() {
     wdWhereCloud(!wifiUp ? WD_AT_WIFI : (!cloudUp ? WD_AT_CLOUDCONN : WD_AT_CLOUD));
     if (runCloud) ArduinoCloud.update();
     cloudMs = (int)(millis() - cloudT0);
-    //  Last resort against "alive but never reconnects": a quarter hour of
-    //  WiFi up and cloud down ends in a marked reset. Not when WiFi itself
-    //  is down -- a reboot would not bring an access point back.
-    if (cloudUp || !wifiUp)             cloudDownSince = 0;
-    else if (cloudDownSince == 0)       cloudDownSince = cloudT0;
-    else if (cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_MS
-             && ((float)waterOwedL == 0.0f || cloudT0 - cloudDownSince >= CLOUD_OFFLINE_RESET_HARD_MS)) {
-      //  Wait for the water ledger to be flat (an in-flight batch would be
-      //  lost for good), but not forever. No LOG here: the marker is the
-      //  record, and a blocked serial port must not delay the reset.
-      bootMarkIntentional("cloud offline 15min");
-      delay(50);
-      NVIC_SystemReset();
-    }
+    //  Offline ladder: re-associate at 5/15 min, reset at 20 min only with
+    //  evidence the uplink is fine, reset regardless at 60 min. Fresh
+    //  status reads: update() may have just changed both.
+    cloudLadderTick(WiFi.status() == WL_CONNECTED, ArduinoCloud.connected(), millis(), (float)waterOwedL);
 #if WIFI_FORCE_SECURITY
     wdWhereCloud(WD_AT_WIFI);          // its WiFi.begin() is the same road as 14
     wifiRescue(millis());
@@ -114,7 +102,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
-      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves());
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now));
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());

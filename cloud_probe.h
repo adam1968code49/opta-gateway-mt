@@ -96,6 +96,7 @@ static uint32_t       s_cloudFailOpens  = 0;
 static uint32_t       s_reresolves      = 0;   // expiries that led to a fresh lookup
 static unsigned long  s_lastCloudProbe = 0;
 static bool           s_lastProbeOk    = false;
+static unsigned long  s_lastProbeOkMs  = 0;   // millis() of the last successful knock; 0 = never
 static uint32_t       s_cloudProbeOks  = 0;
 static uint32_t       s_cloudProbeFails = 0;
 
@@ -103,6 +104,7 @@ inline uint32_t cloudProbeOks()   { return s_cloudProbeOks; }
 inline uint32_t cloudProbeFails() { return s_cloudProbeFails; }
 inline uint32_t cloudFailOpens()  { return s_cloudFailOpens; }
 inline uint32_t cloudReresolves() { return s_reresolves; }
+inline unsigned long cloudProbeLastOkMs() { return s_lastProbeOkMs; }
 
 static unsigned long s_dnsFailMs = 0;   // 0 = no recent failure
 
@@ -160,7 +162,7 @@ static bool cloudUpdateAllowed(bool wifiUp, bool cloudUp, unsigned long now) {
   if (s_lastCloudProbe == 0 || now - s_lastCloudProbe >= CLOUD_PROBE_PERIOD_MS) {
     s_lastCloudProbe = now;
     s_lastProbeOk = cloudProbeOnce();
-    if (s_lastProbeOk) { s_cloudProbeOks++;   s_probeFailSince = 0; }
+    if (s_lastProbeOk) { s_cloudProbeOks++;   s_probeFailSince = 0; s_lastProbeOkMs = now; }
     else               { s_cloudProbeFails++; if (s_probeFailSince == 0) s_probeFailSince = now; }
   }
   if (s_lastProbeOk) return true;
