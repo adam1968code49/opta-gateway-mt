@@ -237,14 +237,16 @@ static void replayTick(unsigned long now, bool cloudUp) {
       s_rpLastCapMs = now;
       replayCapture(cloudSideSnapshot(), now);
     }
-    return;
-  }
-  if (s_rpCloudUpSince == 0) {
+  } else if (s_rpCloudUpSince == 0) {
     s_rpCloudUpSince = now;
     if (s_rpCount) rpStatus(0);                   // first pass back: the queue is visible on the dashboard before anything is sent
   }
   if (s_rpCount == 0) return;
-  if (now - s_rpCloudUpSince < RP_SETTLE_MS) return;
+  //  Drain whenever the internet path is real (influxPushReady checks the
+  //  probe while the Arduino Cloud is down): a broker-only outage is filled
+  //  live, one record at a time, instead of after the broker returns. After
+  //  a reconnect, give the library 2 min of MQTT before adding a second TLS.
+  if (cloudUp && now - s_rpCloudUpSince < RP_SETTLE_MS) return;
   if (!influxPushReady(now)) return;
 
   static char body[INFLUX_MAX_BODY];

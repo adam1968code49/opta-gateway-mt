@@ -39,6 +39,7 @@
 #include "shared.h"
 #include "wd_feeder.h"
 #include "thingProperties.h"
+#include "cloud_probe.h"     // cloudProbeLastOkMs(): "the internet path is real" without needing the MQTT session
 #include "secrets.h"        // INFLUX_HOST / INFLUX_BUCKET / INFLUX_TOKEN -- gitignored, never printed
 
 #ifndef INFLUX_PORT
@@ -83,11 +84,23 @@ static void pushStatSet(const char* st) {
 //  retrying a 401 forever.
 inline bool influxConfigured() { return strncmp(INFLUX_TOKEN, "PUT_YOUR", 8) != 0; }
 
+//  "The path to the internet is real right now": either MQTT is passing, or
+//  -- while the Arduino Cloud is down -- the probe's TCP knock landed within
+//  the last two probe periods. Either one is proof connect() will not sit in
+//  the 18 s "associated but no route" hole. (batch 11.1: without the second
+//  clause the board waited for the Arduino Cloud before filling a gap the
+//  Arduino Cloud itself was causing.)
+inline bool influxNetReal(unsigned long now) {
+  if (ArduinoCloud.connected()) return true;
+  unsigned long ok = cloudProbeLastOkMs();
+  return ok != 0 && now - ok < 2 * CLOUD_PROBE_PERIOD_MS;
+}
+
 inline bool influxPushReady(unsigned long now) {
   if (!influxConfigured())                          return false;
   if (g_otaStarted)                                 return false;   // never a second TLS session beside an OTA download
   if (WiFi.status() != WL_CONNECTED)                return false;
-  if (!ArduinoCloud.connected())                    return false;
+  if (!influxNetReal(now))                          return false;
   if (s_pushLast && now - s_pushLast < s_pushWait)  return false;
   return true;
 }
