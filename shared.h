@@ -133,6 +133,13 @@ struct Cmd {
   float    value;
 };
 
+//  Set by the OTA request callback the moment a download is allowed to
+//  start; never cleared (an OTA ends in a reboot). Anything that would open
+//  a second TLS session while the library downloads -- the InfluxDB push --
+//  stands down while this is set (batch 11 review I3; 2026-09-10 15:07 a
+//  download stalled with the replay posting alongside it).
+static volatile bool g_otaStarted = false;
+
 static_assert(std::is_trivially_copyable<PlcSnapshot>::value,
               "PlcSnapshot must be plain data: no String, no pointers");
 static_assert(sizeof(PlcSnapshot) < 1024,

@@ -404,6 +404,7 @@ static void wifiRescue(unsigned long now) {
 bool onOTARequestCallback() {
   bool const allow = !ctrlControlEnabled();
   otaPending = !allow;
+  if (allow) g_otaStarted = true;          // batch 11: the InfluxDB push stands down for the download (shared.h)
   LOG("[OTA] apply requested -> ");
   LOGLN(allow ? "ALLOW" : "POSTPONE (controlEnabled is on)");
   return allow;

@@ -76,6 +76,7 @@ inline bool influxConfigured() { return strncmp(INFLUX_TOKEN, "PUT_YOUR", 8) != 
 
 inline bool influxPushReady(unsigned long now) {
   if (!influxConfigured())                          return false;
+  if (g_otaStarted)                                 return false;   // never a second TLS session beside an OTA download
   if (WiFi.status() != WL_CONNECTED)                return false;
   if (!ArduinoCloud.connected())                    return false;
   if (s_pushLast && now - s_pushLast < s_pushWait)  return false;
