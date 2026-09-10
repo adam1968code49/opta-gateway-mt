@@ -82,6 +82,7 @@ static unsigned long s_rpLastCapMs = 0;
 static unsigned long s_rpCloudUpSince = 0;
 static uint32_t      s_rpSentRecs = 0, s_rpPosts = 0, s_rpPostFails = 0, s_rpDropped = 0;
 static uint16_t      s_rpLoaded = 0;    // records restored from the KVStore at boot
+static uint32_t      s_rpRejected = 0;  // records dropped because the server refused the body itself (400/413/422)
 
 inline uint16_t replayQueued() { return s_rpCount; }
 
@@ -128,9 +129,12 @@ static int rpLine(char* out, size_t cap, const char* var, float val, uint32_t ep
 //  the number of records it consumed in *used.
 static size_t rpBuildBatch(char* buf, size_t cap, uint16_t nrec, uint16_t* used) {
   size_t n = 0; *used = 0;
+  if (nrec > s_rpCount) nrec = s_rpCount;       // never read past the queue: 2026-09-10 the first live drain
+                                                 // encoded two never-written slots (epoch 0) and underflowed the count
   uint16_t idx = rpOldestIdx();
   for (uint16_t i = 0; i < nrec; i++) {
     const ReplayRec& r = s_rp[(idx + i) % RP_MAX];
+    if (r.epoch < 1600000000UL) { (*used)++; continue; }   // belt and braces: a record without a real time is skipped, not sent
     size_t mark = n;
     bool full = false;
     for (size_t k = 0; k < 28 && !full; k++) {
@@ -161,6 +165,7 @@ static size_t rpBuildBatch(char* buf, size_t cap, uint16_t nrec, uint16_t* used)
 }
 
 static void rpDropOldest(uint16_t k) { if (k > s_rpCount) k = s_rpCount; s_rpCount -= k; s_rpSentRecs += k; }
+static void rpRejectOldest(uint16_t k) { if (k > s_rpCount) k = s_rpCount; s_rpCount -= k; s_rpRejected += k; }
 
 //  Persist oldest-first so the loader is a straight read. CLOUD THREAD,
 //  quiet (reset path): no LOG after the marker.
@@ -214,7 +219,6 @@ inline void replayLoad() {
   if (s_rpLoaded) { LOG("[REPLAY] restored "); LOG((int)s_rpLoaded); LOGLN(" outage records from the KVStore"); }
 }
 
-static uint32_t s_rpRejected = 0;   // records dropped because the server refused the body itself (400/413/422)
 
 static void rpStatus(int lastCode) {
   char st[128];
@@ -246,7 +250,8 @@ static void replayTick(unsigned long now, bool cloudUp) {
   static char body[INFLUX_MAX_BODY];
   uint16_t used = 0;
   size_t n = rpBuildBatch(body, sizeof body, RP_PER_POST, &used);
-  if (used == 0) { s_rpCount--; s_rpDropped++; return; }   // a record that cannot be encoded is not worth a hang
+  if (used == 0) { if (s_rpCount) { s_rpCount--; s_rpDropped++; } return; }   // a record that cannot be encoded is not worth a hang
+  if (n == 0) { rpRejectOldest(used); return; }             // only unusable records in this batch: nothing to send
   int code = influxPush(body, n);
   s_rpPosts++;
   if (code >= 200 && code < 300) rpDropOldest(used);
@@ -256,7 +261,7 @@ static void replayTick(unsigned long now, bool cloudUp) {
     //  forever would wedge the queue head (review C3). Drop that batch,
     //  count it, move on. Auth/bucket errors and transport failures keep
     //  the data and back off (influxPush handles the pacing).
-    if (code == 400 || code == 413 || code == 422) { s_rpRejected += used; s_rpCount -= used; }
+    if (code == 400 || code == 413 || code == 422) rpRejectOldest(used);
   }
   rpStatus(code);
   LOG("[REPLAY] "); LOG((int)used); LOG(" rec -> code "); LOG(code); LOG(", left "); LOGLN((int)s_rpCount);
