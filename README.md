@@ -78,3 +78,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   secrets.h), boot n=66: pushStat = `ok code=204 ms=2573 heap 7048>1976>6528 n=1/0`. The board writes to
   InfluxDB Cloud directly. Open item: since batch 10 every OTA costs TWO boots (n=63 and n=65 never published
   a bootReason; the second boot reports `none`) -- serial needed to see the first one.
+- Batch 11 phase 2 (replay) -- pending OTA. While the cloud is down: one 136-byte record every 10 s (28 sensors with a
+  read-mask, flowRate/flowBatch/displayWaterVolume, plcConnected) into a 360-record ring; persisted to the KVStore before a
+  ladder reset; drained 3 records per POST into arduino_iot once the cloud has been back 2 min; 2xx deletes, 400/413/422
+  drops the batch (rej=), auth errors back off 15 min. pushStat becomes `replay q= sent= posts= last= drop= rej=`.
+  Static RAM 179 -> 247 KB (47%). Only 32 variables are replayed; valves/heat pump are not.

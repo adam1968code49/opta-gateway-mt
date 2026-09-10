@@ -49,8 +49,9 @@
 #endif
 #define INFLUX_MAX_BODY          10240    // ~25 rows of line protocol: one TCP window, one pass
 #define INFLUX_RESP_TIMEOUT_MS   4000     // status line only; a 204 has no body
-#define INFLUX_BACKOFF_MS        30000UL
+#define INFLUX_BACKOFF_MS        30000UL  // first wait after a failure, doubling
 #define INFLUX_BACKOFF_MAX_MS    900000UL // 15 min: replay is never urgent
+#define INFLUX_SUCCESS_GAP_MS    2000UL   // after a 2xx the next POST may follow this soon (review C1: 30 s here made a 60 min drain)
 #define INFLUX_SELFTEST_AFTER_MS 60000UL  // one minute of cloud-up before the experiment
 
 static WiFiClient    s_pushTcp;
@@ -121,11 +122,16 @@ static int influxPush(const char* body, size_t len) {
   s_pushSsl.stop();
   s_pushMs   = (int)(millis() - t0);
   s_pushCode = code;
-  if (code >= 200 && code < 300) { s_pushOks++; s_pushWait = INFLUX_BACKOFF_MS; }
+  if (code >= 200 && code < 300) { s_pushOks++; s_pushWait = INFLUX_SUCCESS_GAP_MS; }
   else {
     s_pushFails++;
-    s_pushWait *= 2;
-    if (s_pushWait > INFLUX_BACKOFF_MAX_MS) s_pushWait = INFLUX_BACKOFF_MAX_MS;
+    //  Auth/bucket problems (401/403/404) cannot be retried into success:
+    //  go straight to the 15 min ceiling instead of hammering.
+    if (code == 401 || code == 403 || code == 404) s_pushWait = INFLUX_BACKOFF_MAX_MS;
+    else {
+      if (s_pushWait < INFLUX_BACKOFF_MS) s_pushWait = INFLUX_BACKOFF_MS; else s_pushWait *= 2;
+      if (s_pushWait > INFLUX_BACKOFF_MAX_MS) s_pushWait = INFLUX_BACKOFF_MAX_MS;
+    }
   }
   LOG("[PUSH] "); LOG((unsigned long)len); LOG(" B, code "); LOG(code); LOG(", "); LOG(s_pushMs); LOGLN(" ms");
   return code;

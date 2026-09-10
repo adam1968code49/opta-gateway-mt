@@ -429,6 +429,7 @@ void setup() {
   while (!Serial && millis() - t0 < 1500) {}
   bootReasonLog();
   episodeLogLoad();                          // batch 10: last offline episode from the KVStore, onto serial and /episode
+  replayLoad();                              // batch 11: outage records saved before a ladder reset, to be replayed
   LOG("\n[MT] opta-gateway-mt starting fw="); LOGLN(FW_VERSION);
 
 

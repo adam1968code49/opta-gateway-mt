@@ -140,5 +140,6 @@ inline uint32_t cloudSideCmdDropped()    { return s_local.cmdDropped; }
 inline int32_t  cloudSideFlowMismatchCount() { return s_local.flowMismatchCount; }
 inline bool     cloudSidePlcConnected()  { return s_local.plcConnected; }
 inline bool     cloudSideHasSnapshot()   { return s_local.seq != 0; }   // false until the PLC thread published once
+inline const PlcSnapshot& cloudSideSnapshot() { return s_local; }       // cloud thread's own copy (batch 11 replay)
 
 #endif // CLOUD_SIDE_H

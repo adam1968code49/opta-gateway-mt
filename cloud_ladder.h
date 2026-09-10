@@ -248,6 +248,7 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
   //  which a wedged thread may hold), then the flight recorder, quietly.
   bootMarkIntentional(tag);
   episodeLogPersist("reset", true, off / 60000UL);
+  replayPersist();                             // batch 11: the outage records survive the reset and drain after it
   delay(50);
   NVIC_SystemReset();
 }

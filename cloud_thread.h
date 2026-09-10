@@ -25,8 +25,9 @@
 #include "cloud_probe.h"
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
+#include "influx_push.h"       // batch 11: direct InfluxDB push transport + self-test
+#include "influx_replay.h"     // batch 11 phase 2: outage ring + replay into arduino_iot (cloud_ladder.h calls replayPersist)
 #include "cloud_ladder.h"      // after cloud_ctrl.h: the no-SYNC guard reads ctrlSyncSeen()
-#include "influx_push.h"       // batch 11: direct InfluxDB push, phase 1 = self-test only
 
 #define CLOUD_THREAD_STACK   24576   // TLS + OTA (second TLS, HTTP, LZSS, FATFS) run here; 16 KB was measured only without OTA
 #define CLOUD_PASS_SLEEP_MS  20
@@ -78,6 +79,7 @@ static void cloudThreadBody() {
     cloudLadderTick(WiFi.status() == WL_CONNECTED, ArduinoCloud.connected(), millis(), (float)waterOwedL);
     //  batch 11 phase 1: prove the HTTPS path to InfluxDB once (heap, ms, code -> pushStat)
     influxSelfTest(millis(), ArduinoCloud.connected());
+    replayTick(millis(), ArduinoCloud.connected());   // capture while down, drain (one POST a pass) once back 2 min
 #if WIFI_FORCE_SECURITY
     wdWhereCloud(WD_AT_WIFI);          // its WiFi.begin() is the same road as 14
     wifiRescue(millis());
@@ -105,7 +107,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
-      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now)); LOG(" sync="); LOG(ctrlSyncSeen() ? (long)((now - ctrlSyncMs()) / 1000UL) : -1L); LOG(" nsk="); LOG(cloudNoSyncKicks()); LOG(" dns="); LOG(cloudDnsOk() < 0 ? "-" : (cloudDnsOk() ? "1" : "0")); LOG("/"); LOG(cloudDnsMs()); LOG(" push="); LOG(influxPushCode()); LOG("/"); LOG(influxPushMs());
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now)); LOG(" sync="); LOG(ctrlSyncSeen() ? (long)((now - ctrlSyncMs()) / 1000UL) : -1L); LOG(" nsk="); LOG(cloudNoSyncKicks()); LOG(" dns="); LOG(cloudDnsOk() < 0 ? "-" : (cloudDnsOk() ? "1" : "0")); LOG("/"); LOG(cloudDnsMs()); LOG(" push="); LOG(influxPushCode()); LOG("/"); LOG(influxPushMs()); LOG(" q="); LOG(replayQueued());
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());
