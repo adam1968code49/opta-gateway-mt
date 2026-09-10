@@ -74,3 +74,7 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   7000 -> 1928 (in session) -> 6480. Server answered 403: the write token lacks permission on bucket
   Atoco_Opta_Live (a wrong token would be 401, an unknown bucket 404). pushStat = `FAIL code=403 ms=2324 heap 7000>1928>6480 n=0/1`.
   Token lives in secrets.h and is compiled in: fixing it means a new build + OTA. Next: phase 2 (offline ring + replay).
+- 2026-09-10 13:38 PT batch 11 phase 1 rebuilt with the corrected write token, fw f975cde (same source, new
+  secrets.h), boot n=66: pushStat = `ok code=204 ms=2573 heap 7048>1976>6528 n=1/0`. The board writes to
+  InfluxDB Cloud directly. Open item: since batch 10 every OTA costs TWO boots (n=63 and n=65 never published
+  a bootReason; the second boot reports `none`) -- serial needed to see the first one.
