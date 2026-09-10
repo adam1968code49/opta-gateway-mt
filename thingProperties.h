@@ -178,6 +178,7 @@ CloudInt    loopMs;         // main pass duration after update()
 CloudInt    cloudMs;        // duration of ArduinoCloud.update()
 CloudInt    eipMs;          // duration of the last eip.begin() attempt
 CloudString lastError;
+CloudString pushStat;               // RO: InfluxDB direct-push self-test result (batch 11): "ok code=204 ms=.. heap a->b n=1/0"
 CloudString fwVersion;
 CloudString bootReason;
 CloudInt    stackFree;      // main thread stack headroom (PLC thread's is batch 3)
@@ -365,6 +366,7 @@ void initProperties() {
   ArduinoCloud.addProperty(cloudMs,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(eipMs,        READ, ON_CHANGE);
   ArduinoCloud.addProperty(lastError,    READ, ON_CHANGE);
+  ArduinoCloud.addProperty(pushStat,     READ, ON_CHANGE);   // the Thing already has it (old firmware)
   ArduinoCloud.addProperty(fwVersion,    READ, ON_CHANGE);
   ArduinoCloud.addProperty(bootReason,   READ, ON_CHANGE);
   ArduinoCloud.addProperty(stackFree,    READ, ON_CHANGE);

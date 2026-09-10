@@ -35,7 +35,7 @@
 #define WD_AT_WEB        1    // handleConfigClient()          main
 #define WD_AT_CLOUD      2    // ArduinoCloud.update(), connected   cloud
 #define WD_AT_USB        3    // usbLogService()               (later)
-#define WD_AT_PUSH       4    // influxSelfTest()              cloud (later)
+#define WD_AT_PUSH       4    // influxPush(): BearSSL handshake + POST to InfluxDB   cloud (batch 11)
 #define WD_AT_EIPCONN    5    // eip.begin()                   plc
 #define WD_AT_SENSORS    6    // pollSensors()                 plc
 #define WD_AT_VALVES     7    // pollValves()                  plc
