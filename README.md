@@ -69,3 +69,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   and one log row a minute into RAM; persisted to the KVStore before a ladder reset (`epi_reset`) and after a
   self-healed episode >= 5 min (`epi_heal`); read back on serial at boot and at http://192.168.102.107/episode.
   Marker format now `off 20m p=8/0 fo=0 wr=2 gw=1 dns=0`. KVStore writers now share g_kvMutex.
+- 2026-09-10 11:52 PT batch 11 phase 1 on IP2 via OTA, fw bae05df, boot n=64: direct-to-InfluxDB transport
+  (BearSSL + Amazon Root CA 1) PROVEN -- TLS handshake and HTTP round trip in 2324 ms, heap fordblks
+  7000 -> 1928 (in session) -> 6480. Server answered 403: the write token lacks permission on bucket
+  Atoco_Opta_Live (a wrong token would be 401, an unknown bucket 404). pushStat = `FAIL code=403 ms=2324 heap 7000>1928>6480 n=0/1`.
+  Token lives in secrets.h and is compiled in: fixing it means a new build + OTA. Next: phase 2 (offline ring + replay).
