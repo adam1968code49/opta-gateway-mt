@@ -91,3 +91,6 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   ladder reset; drained 3 records per POST into arduino_iot once the cloud has been back 2 min; 2xx deletes, 400/413/422
   drops the batch (rej=), auth errors back off 15 min. pushStat becomes `replay q= sent= posts= last= drop= rej=`.
   Static RAM 179 -> 247 KB (47%). Only 32 variables are replayed; valves/heat pump are not.
+- 2026-09-10 15:54 PT IP2 came back by the ladder's evidence rung: `off 22m p=11/0 fo=0 wr=2 gw=1 dns=1 n=70` (n=69 never
+  published). On 0ad2a68 it drained the 3 outage records in one POST (204). 16:14 PT batch 11 final `87b8c33` on IP2
+  via OTA (single boot this time), n=71: queue-bounded batching + no push during an OTA download. Soak baseline n=71.
