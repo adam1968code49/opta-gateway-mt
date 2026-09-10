@@ -205,6 +205,7 @@ static void sendConfigPage(EthernetClient& c, const char* msg) {
             "Password:<br><input name='pass' type='password' maxlength='63' style='width:100%'><br><br>"
             "<input type='submit' value='Save &amp; reboot'></form>"
             "<p><a href='/clear'>Clear override (revert to firmware default) &amp; reboot</a></p>"
+            "<p><a href='/episode'>Last offline episode (flight recorder)</a></p>"
 #if USB_LOG_ENABLE
             "<p><a href='/log'>View the current USB log file</a>"
             " &nbsp;|&nbsp; <a href='/files'>Manage log files (view / delete)</a></p>"
@@ -335,6 +336,19 @@ static void handleConfigClient() {
     client.flush();
     client.stop();
 #endif
+  } else if (strcmp(method, "GET") == 0 && strcmp(path, "/episode") == 0) {
+    //  The flight recorder of the last offline episode (batch 10). Plain
+    //  text: this is read at 08:00 to learn what happened at 04:00.
+    client.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"));
+    client.print(F("bootReason: ")); client.println(bootReasonStr());
+    client.print(F("row format: <min>m w<wifi up> p<probe ok> d<dns ok>/<dns ms> u<update() ms> r<rssi> h<heap free>\n"
+                   "header: # <why> n=<boot seq that wrote it> off=<episode length> rows=<n>\n\n"
+                   "== last episode that ended in a reset ==\n"));
+    client.print(episodeLogPrevReset()[0] ? episodeLogPrevReset() : "(none)\n");
+    client.print(F("\n== last episode that healed by itself (>= 5 min) ==\n"));
+    client.print(episodeLogPrevHeal()[0] ? episodeLogPrevHeal() : "(none)\n");
+    client.flush();
+    client.stop();
   } else if (strcmp(method, "GET") == 0 && strcmp(path, "/clear") == 0) {
     if (wifiStore.begin()) {
       wifiStore.remove(WIFI_KEY_SSID);
@@ -414,6 +428,7 @@ void setup() {
   unsigned long t0 = millis();
   while (!Serial && millis() - t0 < 1500) {}
   bootReasonLog();
+  episodeLogLoad();                          // batch 10: last offline episode from the KVStore, onto serial and /episode
   LOG("\n[MT] opta-gateway-mt starting fw="); LOGLN(FW_VERSION);
 
 

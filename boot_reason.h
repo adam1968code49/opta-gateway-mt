@@ -44,6 +44,8 @@
 // =====================================================================
 #pragma once
 #include <Arduino.h>
+#include <mbed.h>
+#include "rtos/Mutex.h"
 #include <Arduino_KVStore.h>
 #include <mbed_error.h>
 
@@ -170,12 +172,31 @@ extern "C" void mbed_error_hook(const mbed_error_ctx* ctx) {
 }
 #endif  // BOOT_FAULT_HOOK
 
+//  One lock for every KVStore writer (cloud thread: markers + episode log;
+//  feeder thread: give-up marker; main: WiFi override). Each creates its
+//  own TDBStore instance, and two of those writing at once can corrupt the
+//  partition -- which would take the WiFi override with it. Bounded wait:
+//  a marker must never hang behind a wedged writer.
+static rtos::Mutex g_kvMutex;
+#define KV_LOCK_WAIT_MS 2000
+
+inline uint32_t bootSeq() { return s_bootSeq; }
+
 inline void bootMarkIntentional(const char* tag) {
+  if (!g_kvMutex.trylock_for(std::chrono::milliseconds(KV_LOCK_WAIT_MS))) {
+    LOGLN("[BOOT] KVStore busy, reset will look unexplained");
+    return;
+  }
   KVStore kv;
-  if (!kv.begin()) { LOGLN("[BOOT] KVStore begin failed, reset will look unexplained"); return; }
-  kv.putString(BOOT_WHY_KEY, tag);
-  kv.end();                              // flush before the reset lands
-  LOG("[BOOT] marked intentional reset: "); LOGLN(tag);
+  if (kv.begin()) {
+    kv.putString(BOOT_WHY_KEY, tag);
+    kv.end();                              // flush before the reset lands
+    g_kvMutex.unlock();
+    LOG("[BOOT] marked intentional reset: "); LOGLN(tag);
+  } else {
+    g_kvMutex.unlock();
+    LOGLN("[BOOT] KVStore begin failed, reset will look unexplained");
+  }
 }
 
 // ---------------------------------------------------------------------

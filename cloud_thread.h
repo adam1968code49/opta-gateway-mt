@@ -102,7 +102,7 @@ static void cloudThreadBody() {
       LOG(" eipMs=");     LOG((int)eipMs);
       LOG(" stall=");     LOG(wdStallMax()); LOG("@"); LOG(wdStallWhere());
       LOG(" win=");       LOG(wdStallWindowMax()); LOG("@"); LOG(wdStallWindowWhere());
-      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now)); LOG(" sync="); LOG(ctrlSyncSeen() ? (long)((now - ctrlSyncMs()) / 1000UL) : -1L); LOG(" nsk="); LOG(cloudNoSyncKicks());
+      LOG(" probe=");     LOG(cloudProbeOks()); LOG("/"); LOG(cloudProbeFails()); LOG(" failopen="); LOG(cloudFailOpens()); LOG(" rr="); LOG(cloudReresolves()); LOG(" wr="); LOG(cloudReassocs()); LOG(" off="); LOG(cloudOfflineMin(now)); LOG(" sync="); LOG(ctrlSyncSeen() ? (long)((now - ctrlSyncMs()) / 1000UL) : -1L); LOG(" nsk="); LOG(cloudNoSyncKicks()); LOG(" dns="); LOG(cloudDnsOk() < 0 ? "-" : (cloudDnsOk() ? "1" : "0")); LOG("/"); LOG(cloudDnsMs());
       LOG(" mainStk=");   LOG(s_mainStackMin);
       LOG(" cloudStk=");  LOG(s_cloudStack.minFree());
       LOG(" plcStk=");    LOG(cloudSidePlcStackFree());

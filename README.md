@@ -64,3 +64,7 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   plcFailTag names the first unread SENSOR tag first ('all sensors' when the whole sweep is unread; before
   this batch it named status-sweep tags only -- semantic break in the history at this timestamp); `[HB] sync= nsk=`;
   one boot-time gateway ping on serial. `nsk=0` does NOT mean the 2026-09-01 zero-report fault is fixed (see docs/batch9-final-review.md I-1).
+- Batch 10 (flight recorder) -- pending OTA. While the cloud is down: one real DNS lookup a minute (from minute 2)
+  and one log row a minute into RAM; persisted to the KVStore before a ladder reset (`epi_reset`) and after a
+  self-healed episode >= 5 min (`epi_heal`); read back on serial at boot and at http://192.168.102.107/episode.
+  Marker format now `off 20m p=8/0 fo=0 wr=2 gw=1 dns=0`. KVStore writers now share g_kvMutex.

@@ -41,6 +41,9 @@
 #include "wd_feeder.h"
 #include "cloud_probe.h"
 #include "cloud_ctrl.h"        // ctrlSyncSeen()/ctrlSyncMs() for the no-SYNC guard
+#include <malloc.h>
+#include "netsocket/nsapi_dns.h"   // nsapi_dns_reset(): clear mbed's DNS cache so the test lookup is real
+#include "episode_log.h"
 
 #define CLOUD_LADDER_WIFI_SETTLE_MS     120000UL   // no rung acts until WiFi has been up this long
 #define CLOUD_LADDER_REASSOC1_MS        300000UL   // 5 min offline  -> first WiFi.disconnect()
@@ -63,6 +66,30 @@ static bool          s_ldNoSyncKicked  = false;  // one kick per connection
 static uint32_t      s_ldNoSyncKicks   = 0;   // since boot, for [HB]
 static bool          s_ldSyncWasSeen   = false;  // ctrlSyncSeen() last pass: a true->false edge restarts the 6 min
 static bool          s_ldGwPingDone    = false;  // one boot-time gateway ping, so the instrument is proven to speak
+static int           s_ldDnsOk         = -1;  // last DNS test this episode: -1 not run, 0 failed, 1 ok
+static unsigned long s_ldDnsMs         = 0;   // ...and how long it took
+static uint32_t      s_ldDnsFails      = 0;   // failed DNS tests this episode
+static int           s_ldCloudMsMax    = 0;   // longest update() pass this episode
+static unsigned long s_ldLastRowMs     = 0;   // last episode-log row / DNS test
+
+inline int           cloudDnsOk() { return s_ldDnsOk; }
+inline unsigned long cloudDnsMs() { return s_ldDnsMs; }
+
+//  One real lookup: drop mbed's cache first, otherwise a cached answer
+//  says nothing about the resolver. Only ever called while the cloud is
+//  down, on this thread, so it cannot race the library's own lookups.
+static void cloudLadderDnsTest() {
+  NetworkInterface* net = WiFi.getNetwork();
+  if (net == nullptr) { s_ldDnsOk = 0; s_ldDnsMs = 0; s_ldDnsFails++; return; }
+  wdWhereCloud(WD_AT_CLOUDPROBE);
+  nsapi_dns_reset();
+  SocketAddress a;
+  unsigned long t0 = millis();
+  bool ok = net->gethostbyname(CLOUD_PROBE_HOST, &a) == NSAPI_ERROR_OK;
+  s_ldDnsMs = millis() - t0;
+  s_ldDnsOk = ok ? 1 : 0;
+  if (!ok) s_ldDnsFails++;
+}
 
 //  One ICMP echo to the router. Returns the RTT in ms, negative on failure.
 //  Bounded by CLOUD_LADDER_GW_PING_MS; caller sets the where-code.
@@ -100,7 +127,12 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
     if (s_ldOfflineSince != 0) {
       LOG("[CLOUD] back after "); LOG((now - s_ldOfflineSince) / 60000UL);
       LOG(" min: p="); LOG(cloudProbeOks() - s_ldOks0); LOG("/"); LOG(cloudProbeFails() - s_ldFails0);
-      LOG(" fo="); LOG(cloudFailOpens() - s_ldFailOpens0); LOG(" wr="); LOGLN(s_ldReassocDone);
+      LOG(" fo="); LOG(cloudFailOpens() - s_ldFailOpens0); LOG(" wr="); LOG(s_ldReassocDone);
+      LOG(" dnsFails="); LOG(s_ldDnsFails); LOG(" upmax="); LOG(s_ldCloudMsMax); LOGLN(" ms");
+      //  An episode long enough to matter is kept even when it healed by
+      //  itself: that is the only way a 7 min stall ever gets looked at.
+      if (now - s_ldOfflineSince >= EPI_PERSIST_MIN_MS)
+        episodeLogPersist("heal", false, (now - s_ldOfflineSince) / 60000UL);
     }
     s_ldOfflineSince = 0; s_ldResetArmedAt = 0; s_ldReassocDone = 0;
 
@@ -141,10 +173,31 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
   if (s_ldOfflineSince == 0) {                 // episode begins: baseline the evidence counters
     s_ldOfflineSince = now;
     s_ldOks0 = cloudProbeOks(); s_ldFails0 = cloudProbeFails(); s_ldFailOpens0 = cloudFailOpens();
+    s_ldDnsOk = -1; s_ldDnsMs = 0; s_ldDnsFails = 0; s_ldCloudMsMax = 0; s_ldLastRowMs = 0;
+    episodeLogClear();
     return;
   }
 
   unsigned long off = now - s_ldOfflineSince;
+
+  //  Flight recorder: one DNS test and one row a minute, WiFi up or down.
+  //  The row is what the morning after gets to read (/episode).
+  if ((int)cloudMs > s_ldCloudMsMax) s_ldCloudMsMax = (int)cloudMs;
+  if (s_ldLastRowMs == 0 || now - s_ldLastRowMs >= EPI_PERIOD_MS) {
+    s_ldLastRowMs = now;
+    //  Not in the first two minutes: the library and the probe are still
+    //  using the cached A record then, and flushing it out from under them
+    //  would make the instrument part of the fault (review I-1).
+    if (wifiUp && off >= 2 * EPI_PERIOD_MS) cloudLadderDnsTest();
+    struct mallinfo mi = mallinfo();
+    char row[EPI_ROW_CAP];
+    snprintf(row, sizeof row, "%lum w%d p%d d%c/%lu u%d r%d h%lu",
+             off / 60000UL, wifiUp ? 1 : 0, cloudProbeLastOk() ? 1 : 0,
+             s_ldDnsOk < 0 ? '-' : (s_ldDnsOk ? '1' : '0'), s_ldDnsMs,
+             (int)cloudMs, wifiUp ? (int)WiFi.RSSI() : 0, (unsigned long)mi.fordblks);
+    episodeLogAdd(row);
+    LOG("[EPI] "); LOGLN(row);
+  }
 
   //  Nothing acts on a radio that is down or has only just come up: a
   //  reboot cannot bring an AP back, and a fresh association deserves the
@@ -180,19 +233,21 @@ static void cloudLadderTick(bool wifiUp, bool cloudUp, unsigned long now, float 
   //  Is the router itself answering? Distinguishes "the uplink is down"
   //  (gw=ok, p=0) from "the router is wedged" (gw=fail): the second one
   //  is fixed by power-cycling the router, not by anything on this board.
-  const char* gw = "na";
+  char gw = '-';                               // 1 answered, 0 did not, - WiFi down
   if (WiFi.status() == WL_CONNECTED) {
     wdWhereCloud(WD_AT_WIFI);
-    gw = cloudLadderGwPing() >= 0 ? "ok" : "fail";
+    gw = cloudLadderGwPing() >= 0 ? '1' : '0';
   }
+  char dns = s_ldDnsOk < 0 ? '-' : (s_ldDnsOk ? '1' : '0');
   char tag[48];                                // bootMarkIntentional's own buffer is 48
-  snprintf(tag, sizeof tag, "offline %lum p=%lu/%lu fo=%lu wr=%u gw=%s",   // <= 43 chars
+  snprintf(tag, sizeof tag, "off %lum p=%lu/%lu fo=%lu wr=%u gw=%c dns=%c",   // <= 42 chars
            off / 60000UL,
            (unsigned long)(cloudProbeOks() - s_ldOks0), (unsigned long)(cloudProbeFails() - s_ldFails0),
-           (unsigned long)(cloudFailOpens() - s_ldFailOpens0), (unsigned)s_ldReassocDone, gw);
-  //  No LOG here: the marker is the record, and a blocked serial port must
-  //  not delay the reset.
+           (unsigned long)(cloudFailOpens() - s_ldFailOpens0), (unsigned)s_ldReassocDone, gw, dns);
+  //  Marker first (the rule wd_feeder.h also follows: LOG takes g_logMutex,
+  //  which a wedged thread may hold), then the flight recorder, quietly.
   bootMarkIntentional(tag);
+  episodeLogPersist("reset", true, off / 60000UL);
   delay(50);
   NVIC_SystemReset();
 }

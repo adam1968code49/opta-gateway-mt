@@ -105,6 +105,7 @@ inline uint32_t cloudProbeFails() { return s_cloudProbeFails; }
 inline uint32_t cloudFailOpens()  { return s_cloudFailOpens; }
 inline uint32_t cloudReresolves() { return s_reresolves; }
 inline unsigned long cloudProbeLastOkMs() { return s_lastProbeOkMs; }
+inline bool          cloudProbeLastOk()   { return s_lastProbeOk; }
 
 static unsigned long s_dnsFailMs = 0;   // 0 = no recent failure
 
