@@ -99,6 +99,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   boundary (lastError, plcFailTag, plcStateText, pushStat) and only when the text actually changes -- the 2 s
   unconditional rebuilds of lastError/plcFailTag are gone; readStringUntil replaced by a fixed buffer. What remains is
   library heap (ArduinoIoTCloud properties/CBOR, MQTT, mbed sockets, KVStore, DNS) watched via heapFree.
-- Batch 11.1 -- pending OTA: replay drains whenever the internet path is real (MQTT up, OR the probe's knock landed
+- 2026-09-10 16:35 PT batch 11.1 on IP2 via OTA, fw 9059e39, n=73 (single boot). At boot the one outage record was
+  pushed BEFORE the Arduino Cloud connected (probe said the path was real): `replay q=0 sent=1 last=204` in the very
+  first publish. Soak baseline n=73. Batch 11.1 content: replay drains whenever the internet path is real (MQTT up, OR the probe's knock landed
   within 2 probe periods while the Arduino Cloud is down), so a broker-only outage is filled live instead of after
   the broker returns. Upstream-down episodes still queue and drain later.
