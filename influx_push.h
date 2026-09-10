@@ -70,6 +70,15 @@ inline uint32_t influxPushFails() { return s_pushFails; }
 inline int      influxPushMs()    { return s_pushMs; }
 inline int      influxPushCode()  { return s_pushCode; }
 
+//  pushStat is a CloudString (two Strings inside). Build the String only
+//  when the text actually changed, never on a rewrite of the same status.
+static char s_pushStatPrev[128] = "";
+static void pushStatSet(const char* st) {
+  if (strncmp(s_pushStatPrev, st, sizeof s_pushStatPrev) == 0) return;
+  snprintf(s_pushStatPrev, sizeof s_pushStatPrev, "%s", st);
+  pushStat = String(st);
+}
+
 //  A board built from secrets.h.example pushes nothing rather than
 //  retrying a 401 forever.
 inline bool influxConfigured() { return strncmp(INFLUX_TOKEN, "PUT_YOUR", 8) != 0; }
@@ -111,9 +120,19 @@ static int influxPush(const char* body, size_t len) {
     unsigned long tw = millis();
     while (millis() - tw < INFLUX_RESP_TIMEOUT_MS) {
       if (s_pushSsl.available()) {
-        String head = s_pushSsl.readStringUntil('\n');
-        int sp = head.indexOf(' ');
-        if (sp > 0) code = head.substring(sp + 1, sp + 4).toInt();
+        //  "HTTP/1.1 204 No Content" -- status line into a fixed buffer (no
+        //  String), the three digits after the first space are the code.
+        char head[48]; size_t hn = 0;
+        unsigned long th = millis();
+        while (millis() - th < 1000) {
+          int ch = s_pushSsl.available() ? s_pushSsl.read() : -1;
+          if (ch < 0) { if (!s_pushSsl.connected()) break; delay(2); continue; }
+          if (ch == '\n') break;
+          if (hn < sizeof head - 1) head[hn++] = (char)ch;
+        }
+        head[hn] = 0;
+        const char* sp = strchr(head, ' ');
+        if (sp && sp[1] >= '0' && sp[1] <= '9') code = atoi(sp + 1);
         break;
       }
       if (!s_pushSsl.connected()) break;
@@ -150,7 +169,7 @@ static void influxSelfTest(unsigned long now, bool cloudUp) {
   if (!cloudUp) { s_selfTestArmedAt = 0; return; }
   if (s_selfTestArmedAt == 0) { s_selfTestArmedAt = now; return; }
   if (now - s_selfTestArmedAt < INFLUX_SELFTEST_AFTER_MS) return;
-  if (!influxConfigured()) { s_selfTestDone = true; pushStat = "not configured (placeholder token)"; return; }
+  if (!influxConfigured()) { s_selfTestDone = true; pushStatSet("not configured (placeholder token)"); return; }
   if (!influxPushReady(now)) return;
   time_t epoch = time(nullptr);
   if (epoch < (time_t)1600000000L) return;         // RTC not set yet: no timestamp, no row
@@ -160,7 +179,7 @@ static void influxSelfTest(unsigned long now, bool cloudUp) {
   int n = snprintf(line, sizeof line, "opta_selftest,thing_name=%s heapFree=%lui,uptimeS=%lui,fw=\"%s\" %lu\n",
                    INFLUX_THING_NAME, (unsigned long)before.fordblks, (unsigned long)(now / 1000UL),
                    FW_VERSION, (unsigned long)epoch);
-  if (n <= 0 || (size_t)n >= sizeof line) { s_selfTestDone = true; pushStat = "selftest line too long"; return; }
+  if (n <= 0 || (size_t)n >= sizeof line) { s_selfTestDone = true; pushStatSet("selftest line too long"); return; }
   int code = influxPush(line, (size_t)n);
   struct mallinfo after = mallinfo();
   s_selfTestDone = true;
@@ -170,7 +189,7 @@ static void influxSelfTest(unsigned long now, bool cloudUp) {
            (code >= 200 && code < 300) ? "ok" : "FAIL", code, s_pushMs,
            (unsigned long)before.fordblks, (unsigned long)s_pushHeapPeakFree, (unsigned long)after.fordblks,
            (unsigned long)s_pushOks, (unsigned long)s_pushFails);
-  pushStat = String(st);
+  pushStatSet(st);
   LOG("[PUSH] selftest: "); LOGLN(st);
 }
 

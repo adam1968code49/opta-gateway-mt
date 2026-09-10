@@ -94,3 +94,8 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
 - 2026-09-10 15:54 PT IP2 came back by the ladder's evidence rung: `off 22m p=11/0 fo=0 wr=2 gw=1 dns=1 n=70` (n=69 never
   published). On 0ad2a68 it drained the 3 outage records in one POST (204). 16:14 PT batch 11 final `87b8c33` on IP2
   via OTA (single boot this time), n=71: queue-bounded batching + no push during an OTA download. Soak baseline n=71.
+- 2026-09-10 heap/recursion audit of the sketch's own files (Adam's ask): no new/malloc, no STL containers, no
+  recursion (rtos::Mail is a fixed pool). Arduino String appeared on 7 compiled lines; now 5, all at the CloudString
+  boundary (lastError, plcFailTag, plcStateText, pushStat) and only when the text actually changes -- the 2 s
+  unconditional rebuilds of lastError/plcFailTag are gone; readStringUntil replaced by a fixed buffer. What remains is
+  library heap (ArduinoIoTCloud properties/CBOR, MQTT, mbed sockets, KVStore, DNS) watched via heapFree.

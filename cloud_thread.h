@@ -59,7 +59,8 @@ static void cloudThreadBody() {
       lastWarn = millis();
       char b[PlcSnapshot::LASTERR_CAP];
       snprintf(b, sizeof b, "plc thread stalled %lus", (unsigned long)(cloudSideSnapshotAgeMs() / 1000));
-      lastError = String(b);
+      static char prevStall[PlcSnapshot::LASTERR_CAP] = "";
+      if (strcmp(prevStall, b) != 0) { snprintf(prevStall, sizeof prevStall, "%s", b); lastError = String(b); }   // only when the text moved
       LOGLN(b);
     }
 

@@ -225,7 +225,7 @@ static void rpStatus(int lastCode) {
   snprintf(st, sizeof st, "replay q=%u sent=%lu posts=%lu/%lu last=%d drop=%lu rej=%lu",
            (unsigned)s_rpCount, (unsigned long)s_rpSentRecs, (unsigned long)s_rpPosts,
            (unsigned long)s_rpPostFails, lastCode, (unsigned long)s_rpDropped, (unsigned long)s_rpRejected);
-  pushStat = String(st);
+  pushStatSet(st);
 }
 
 //  CLOUD THREAD, every pass, after update() and the ladder.

@@ -63,7 +63,13 @@ static void cloudSideAssign() {
   TAKE_VB(30, stIndoorCirc); TAKE_VB(31, stIndoorFlow); TAKE_VB(32, stOutdoorFlow);
   TAKE_VB(33, stLockout);    TAKE_VB(34, stPhaseFault); TAKE_VB(35, stBACnetControl);
   plcReadFails = (int)s_local.valveFails;
-  plcFailTag   = String(s_local.failTag);
+  //  CloudString holds a String: assigning it every 2 s is a heap round trip
+  //  even when nothing changed. Assign only on a real change of text.
+  static char prevFailTag[PlcSnapshot::FAILTAG_CAP] = "";
+  if (strcmp(prevFailTag, s_local.failTag) != 0) {
+    snprintf(prevFailTag, sizeof prevFailTag, "%s", s_local.failTag);
+    plcFailTag = String(s_local.failTag);
+  }
 
   // ---- state words and timers: only when the 6 s sweep actually ran -------
   static uint32_t lastStateSeq = 0;
@@ -71,7 +77,11 @@ static void cloudSideAssign() {
     lastStateSeq = s_local.stateSeq;
     plcActionWord     = (int)s_local.actionWord;
     plcStateWord      = (int)s_local.stateWord;
-    plcStateText      = String(s_local.stateText);
+    static char prevStateText[PlcSnapshot::STATETEXT_CAP] = "";
+    if (strcmp(prevStateText, s_local.stateText) != 0) {
+      snprintf(prevStateText, sizeof prevStateText, "%s", s_local.stateText);
+      plcStateText = String(s_local.stateText);
+    }
     adsorpElapsedS    = (int)s_local.adsorpElapsedS;
     desorpElapsedT6S  = (int)s_local.desorpElapsedT6S;
     desorpElapsedT11S = (int)s_local.desorpElapsedT11S;
@@ -117,7 +127,11 @@ static void cloudSideAssign() {
   // ---- link ---------------------------------------------------------------
   plcConnected = s_local.plcConnected;
   eipMs        = (int)s_local.eipMs;
-  lastError    = String(s_local.lastError);     // String built on main, from char[]
+  static char prevLastError[PlcSnapshot::LASTERR_CAP] = "";
+  if (strcmp(prevLastError, s_local.lastError) != 0) {
+    snprintf(prevLastError, sizeof prevLastError, "%s", s_local.lastError);
+    lastError = String(s_local.lastError);     // the one String this file still builds, and only on change
+  }
 }
 #undef TAKE
 #undef TAKE_VB
