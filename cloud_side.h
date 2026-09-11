@@ -16,6 +16,15 @@
 
 static PlcSnapshot s_local = {};
 
+//  What lastError currently holds, as far as this file knows. The de-dup in
+//  cloudSideAssign() compares the snapshot text against THIS, so any other
+//  writer of lastError (the cloud thread's "plc thread stalled" warning)
+//  must record what it wrote here -- otherwise the next "ok" from the PLC
+//  looks unchanged and the warning sticks on the dashboard forever
+//  (2026-09-11 10:32 boot: "plc thread stalled 64s" stayed up for hours).
+static char s_prevLastError[PlcSnapshot::LASTERR_CAP] = "";
+inline void cloudSideNoteLastError(const char* text) { snprintf(s_prevLastError, sizeof s_prevLastError, "%s", text); }
+
 //  Assign sensor slot i only if it was read this tick.
 #define TAKE(i, var)    do { if (s_local.ok[i])      var = s_local.sensor[i]; } while (0)
 //  Valve sweep: BOOL tags arrive as 0.0/1.0 -- compare against 0.5.
@@ -127,9 +136,8 @@ static void cloudSideAssign() {
   // ---- link ---------------------------------------------------------------
   plcConnected = s_local.plcConnected;
   eipMs        = (int)s_local.eipMs;
-  static char prevLastError[PlcSnapshot::LASTERR_CAP] = "";
-  if (strcmp(prevLastError, s_local.lastError) != 0) {
-    snprintf(prevLastError, sizeof prevLastError, "%s", s_local.lastError);
+  if (strcmp(s_prevLastError, s_local.lastError) != 0) {
+    snprintf(s_prevLastError, sizeof s_prevLastError, "%s", s_local.lastError);
     lastError = String(s_local.lastError);     // the one String this file still builds, and only on change
   }
 }
