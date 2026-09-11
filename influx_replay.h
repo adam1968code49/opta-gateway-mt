@@ -47,6 +47,11 @@
 #define RP_KEY_CHUNK_FMT    "rp_%u"
 #define RP_META_MAGIC       0x52500000UL   // 'RP' + layout version 0 in the high half of the meta int; count in the low 16 bits
 #define RP_FRESH_MS         (3 * SAMPLE_INTERVAL_MS)   // a snapshot older than this is a stalled PLC thread, not a reading
+#define RP_MIN_DOWN_MS      5000UL    // connected() must have been false this long before the first capture: a one-pass blip is not an outage
+#define RP_LIVE_AFTER_MS    60000UL   // drain live (probe path) only once the outage is this old; shorter ones drain after the 2 min settle
+#define RP_EPOCH_MIN        1600000000UL   // 2020-09: RTC not set
+#define RP_EPOCH_MAX        2000000000UL   // 2033-05: RTC garbage (2026-09-11 a batch landed in the year 2102)
+#define RP_EPOCH_STEP_MAX   86400UL        // a record may not jump more than a day from the previous one
 
 //  okMask bits 0..27 = sensor slot read this tick. Upper bits:
 #define RP_OK_FLOW          (1UL << 28)   // flowRate/flowBatch valid (the meter is the Opta's own: always, when fresh)
@@ -88,14 +93,31 @@ inline uint16_t replayQueued() { return s_rpCount; }
 
 static inline uint16_t rpOldestIdx() { return (uint16_t)((s_rpHead + RP_MAX - s_rpCount) % RP_MAX); }
 
+static uint32_t s_rpLastEpoch = 0;   // last accepted epoch: the next one must be within RP_EPOCH_STEP_MAX of it
+static uint32_t s_rpBadEpoch  = 0;   // captures refused for an implausible RTC reading
+
+static bool rpEpochSane(uint32_t e) {
+  if (e < RP_EPOCH_MIN || e > RP_EPOCH_MAX) return false;
+  if (s_rpLastEpoch != 0) {
+    uint32_t d = e > s_rpLastEpoch ? e - s_rpLastEpoch : s_rpLastEpoch - e;
+    if (d > RP_EPOCH_STEP_MAX) return false;
+  }
+  return true;
+}
+
 static void replayCapture(const PlcSnapshot& s, unsigned long now) {
-  time_t epoch = time(nullptr);
-  if (epoch < (time_t)1600000000L) return;         // no RTC: a record without a time is not a record
+  time_t tnow = time(nullptr);
+  uint32_t epoch = (uint32_t)tnow;
+  //  No RTC, or an RTC reading that cannot be right (2026-09-11: sixteen
+  //  records went to InfluxDB dated 2102): a record without a real time is
+  //  not a record. Checked again at send time.
+  if (tnow <= 0 || !rpEpochSane(epoch)) { s_rpBadEpoch++; return; }
+  s_rpLastEpoch = epoch;
   //  A stalled PLC thread leaves s_local frozen with ok[] still true: that
   //  is not 28 readings, it is one reading repeated. Skip the tick.
   if (now - s.stampMs > RP_FRESH_MS) return;
   ReplayRec& r = s_rp[s_rpHead];
-  r.epoch = (uint32_t)epoch;
+  r.epoch = epoch;
   r.okMask = RP_OK_FLOW;
   for (size_t k = 0; k < 28; k++) { r.v[k] = s.sensor[k]; if (s.ok[k]) r.okMask |= (1UL << k); }
   r.flowRate = s.flowRate; r.flowBatch = s.flowBatch; r.cum = s.liveCum;
@@ -134,7 +156,7 @@ static size_t rpBuildBatch(char* buf, size_t cap, uint16_t nrec, uint16_t* used)
   uint16_t idx = rpOldestIdx();
   for (uint16_t i = 0; i < nrec; i++) {
     const ReplayRec& r = s_rp[(idx + i) % RP_MAX];
-    if (r.epoch < 1600000000UL) { (*used)++; continue; }   // belt and braces: a record without a real time is skipped, not sent
+    if (r.epoch < RP_EPOCH_MIN || r.epoch > RP_EPOCH_MAX) { (*used)++; continue; }   // never send a time that cannot be right
     size_t mark = n;
     bool full = false;
     for (size_t k = 0; k < 28 && !full; k++) {
@@ -222,30 +244,39 @@ inline void replayLoad() {
 
 static void rpStatus(int lastCode) {
   char st[128];
-  snprintf(st, sizeof st, "replay q=%u sent=%lu posts=%lu/%lu last=%d drop=%lu rej=%lu",
+  snprintf(st, sizeof st, "replay q=%u sent=%lu posts=%lu/%lu last=%d drop=%lu rej=%lu badt=%lu",
            (unsigned)s_rpCount, (unsigned long)s_rpSentRecs, (unsigned long)s_rpPosts,
-           (unsigned long)s_rpPostFails, lastCode, (unsigned long)s_rpDropped, (unsigned long)s_rpRejected);
+           (unsigned long)s_rpPostFails, lastCode, (unsigned long)s_rpDropped, (unsigned long)s_rpRejected, (unsigned long)s_rpBadEpoch);
   pushStatSet(st);
 }
 
 //  CLOUD THREAD, every pass, after update() and the ladder.
 static void replayTick(unsigned long now, bool cloudUp) {
   SHARED_ASSERT_ON_CLOUD();
+  static unsigned long downSince = 0;           // first pass that saw connected() false; 0 = up
   if (!cloudUp) {
     s_rpCloudUpSince = 0;
-    if (cloudSideHasSnapshot() && (s_rpLastCapMs == 0 || now - s_rpLastCapMs >= RP_PERIOD_MS)) {
+    if (downSince == 0) downSince = now;
+    //  connected() flickers false for a single pass some 40 times a night
+    //  (2026-09-10/11) with the session otherwise fine: no capture, no POST
+    //  for those. An outage starts being recorded after RP_MIN_DOWN_MS.
+    if (now - downSince >= RP_MIN_DOWN_MS && cloudSideHasSnapshot()
+        && (s_rpLastCapMs == 0 || now - s_rpLastCapMs >= RP_PERIOD_MS)) {
       s_rpLastCapMs = now;
       replayCapture(cloudSideSnapshot(), now);
     }
-  } else if (s_rpCloudUpSince == 0) {
-    s_rpCloudUpSince = now;
-    if (s_rpCount) rpStatus(0);                   // first pass back: the queue is visible on the dashboard before anything is sent
+  } else {
+    downSince = 0;
+    if (s_rpCloudUpSince == 0) {
+      s_rpCloudUpSince = now;
+      if (s_rpCount) rpStatus(0);                 // first pass back: the queue is visible on the dashboard before anything is sent
+    }
   }
   if (s_rpCount == 0) return;
-  //  Drain whenever the internet path is real (influxPushReady checks the
-  //  probe while the Arduino Cloud is down): a broker-only outage is filled
-  //  live, one record at a time, instead of after the broker returns. After
-  //  a reconnect, give the library 2 min of MQTT before adding a second TLS.
+  //  Drain live (probe path, Arduino Cloud still down) only once the outage
+  //  is RP_LIVE_AFTER_MS old -- a short one is not worth a TLS session while
+  //  the MQTT client is busy reconnecting; it drains after the 2 min settle.
+  if (!cloudUp && now - downSince < RP_LIVE_AFTER_MS) return;
   if (cloudUp && now - s_rpCloudUpSince < RP_SETTLE_MS) return;
   if (!influxPushReady(now)) return;
 
