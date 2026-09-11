@@ -1,0 +1,73 @@
+# CI build: the same gate as the desk -- tools/build.sh with arduino-cli,
+# core and libraries pinned to the versions the board was actually built
+# with (2026-09-11). A warning in a sketch file fails the job, exactly as it
+# does locally.
+#
+# The firmware this job produces carries PLACEHOLDER credentials (the
+# .example files): it proves the source compiles, it is NOT for OTA. Real
+# builds still come from a desk with secrets.h / arduino_secrets.h filled.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # tools/build.sh runs `git describe`
+
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: "1.4.1"
+
+      - name: Cache the Opta core and the libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: opta-4.6.0-libs-2026-09-11
+
+      - name: Install the Opta core (same version as the desk)
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_opta@4.6.0
+
+      - name: Install the libraries (pinned to the desk build)
+        run: |
+          arduino-cli lib install \
+            "ArduinoIoTCloud@2.10.0" \
+            "Arduino_ConnectionHandler@1.3.0" \
+            "ArduinoMqttClient@0.1.8" \
+            "ArduinoBearSSL@1.8.0" \
+            "ArduinoECCX08@1.4.1" \
+            "Arduino_SecureElement@1.0.0" \
+            "Arduino_DebugUtils@1.5.0" \
+            "Arduino_CloudUtils@1.2.0" \
+            "Arduino_NetworkConfigurator@0.5.1" \
+            "Arduino_KVStore@1.0.1" \
+            "ArduinoHttpClient@0.6.1" \
+            "ArduinoBLE@2.1.0" \
+            "WiFi101@0.16.1"
+          arduino-cli lib list
+
+      - name: Placeholder credentials (compile-only build)
+        run: |
+          cp secrets.h.example secrets.h
+          cp arduino_secrets.h.example arduino_secrets.h
+
+      - name: Build through the warning gate
+        run: bash tools/build.sh --output-dir out
+
+      - name: Keep the artifact (placeholder credentials -- not for OTA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: opta-gateway-mt-ci-placeholder-credentials
+          path: out/*.bin
+          retention-days: 14

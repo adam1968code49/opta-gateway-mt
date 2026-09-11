@@ -108,3 +108,10 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   flickers); live drain only once an outage is 60 s old; epoch sanity [1.6e9, 2.0e9] and <= 1 day step at capture and
   send (16 records / 512 points landed in the year 2102 overnight -- undeletable on Cloud Serverless, harmless to
   time-ranged dashboards; ops queries must bound time <= now()).
+
+## CI
+
+`.github/workflows/build.yml` compiles every push to `main` (and every PR) with `arduino-cli 1.4.1`,
+core `arduino:mbed_opta@4.6.0` and the libraries pinned to the desk build of 2026-09-11, through the same
+`tools/build.sh` warning gate. It builds with the `.example` credential files, so the artifact it keeps is
+compile-proof only -- never OTA it. When a library is upgraded on the desk, bump the version here and the cache key.
