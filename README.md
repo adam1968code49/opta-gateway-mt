@@ -104,3 +104,7 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   first publish. Soak baseline n=73. Batch 11.1 content: replay drains whenever the internet path is real (MQTT up, OR the probe's knock landed
   within 2 probe periods while the Arduino Cloud is down), so a broker-only outage is filled live instead of after
   the broker returns. Upstream-down episodes still queue and drain later.
+- Batch 11.2 -- pending OTA: capture only after connected() has been false 5 s (41 of 49 overnight "outages" were one-pass
+  flickers); live drain only once an outage is 60 s old; epoch sanity [1.6e9, 2.0e9] and <= 1 day step at capture and
+  send (16 records / 512 points landed in the year 2102 overnight -- undeletable on Cloud Serverless, harmless to
+  time-ranged dashboards; ops queries must bound time <= now()).
