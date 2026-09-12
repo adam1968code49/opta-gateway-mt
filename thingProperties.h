@@ -179,7 +179,8 @@ CloudBool  clearGenError;      // -> Gen_Error   := 0, then read back
 //  Mirrors of the PLC's actual outputs (cloud_side.h), so they show truth and
 //  flip back if the PLC overwrites what the operator asked for.
 CloudBool  manS4Open;          // -> Air_S4_Output 100/0
-CloudBool  manCondPump;        // -> Cond_Pump, interlocked on S4 open, auto-stop at level 18 / 180 s
+CloudBool  manCondPump;        // -> Cond_Pump, interlocked on S4 + S5 open, auto-stop at level 18 / 180 s
+CloudBool  manS5Open;          // -> Air_S5 (tank -> pump), BOOL
 CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
 CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 5-60
 
@@ -221,6 +222,7 @@ void onClearTempErrorChange();
 void onClearGenErrorChange();
 void onManS4OpenChange();
 void onManCondPumpChange();
+void onManS5OpenChange();
 
 void initProperties() {
   // --- sensors ---
@@ -378,6 +380,7 @@ void initProperties() {
   ArduinoCloud.addProperty(clearGenError,   READWRITE, ON_CHANGE, onClearGenErrorChange);
   ArduinoCloud.addProperty(manS4Open,   READWRITE, ON_CHANGE, onManS4OpenChange);      // batch 13
   ArduinoCloud.addProperty(manCondPump, READWRITE, ON_CHANGE, onManCondPumpChange);
+  ArduinoCloud.addProperty(manS5Open,   READWRITE, ON_CHANGE, onManS5OpenChange);      // batch 13.1
   ArduinoCloud.addProperty(adsorpTimeMs,   READWRITE, ON_CHANGE, onAdsorpTimeMsChange);
   ArduinoCloud.addProperty(desorpTimeMs,   READWRITE, ON_CHANGE, onDesorpTimeMsChange);
 

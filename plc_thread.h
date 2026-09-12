@@ -373,11 +373,18 @@ static void clearVerifyTick(PlcSnapshot& w) {
 //  stays alone. Ownership ends when the operator turns it off, when the PLC
 //  is seen to have taken it back, or when the read-back verdict says so.
 static bool          s_manOwnS4      = false;
+static bool          s_manOwnS5      = false;   // batch 13.1: Air_S5, tank -> pump
 static bool          s_manPumpActive = false;   // == the gateway owns a running pump (timer armed)
 static unsigned long s_manPumpOnMs   = 0;
-static bool          s_manChk[2]     = { false, false };   // 0 = S4, 1 = pump
-static bool          s_manExpect[2]  = { false, false };
-static unsigned long s_manDueMs[2]   = { 0, 0 };
+#define MAN_N 3                                 // 0 = S4, 1 = pump, 2 = S5
+static bool          s_manChk[MAN_N]    = { false, false, false };
+static bool          s_manExpect[MAN_N] = { false, false, false };
+static unsigned long s_manDueMs[MAN_N]  = { 0, 0, 0 };
+static const uint8_t MAN_SLOT[MAN_N]    = { VSLOT_POS_S4, VSLOT_P_COND, VSLOT_V_S5 };
+static const char* const MAN_WHO[MAN_N] = { "S4", TAG_P_COND, "S5" };
+static inline bool manReadOn(const PlcSnapshot& w, uint8_t i) {   // slot 0 is a 0..100 REAL, the others BOOL
+  return (i == 0) ? (w.valve[MAN_SLOT[i]] >= 50.0f) : (w.valve[MAN_SLOT[i]] > 0.5f);
+}
 
 static void manArm(uint8_t i, bool expect) {
   s_manChk[i] = true; s_manExpect[i] = expect; s_manDueMs[i] = millis() + MAN_VERIFY_MS;
@@ -420,14 +427,37 @@ static bool manPump(PlcSnapshot& w, bool on) {
     clearSay(w, "%s", "pump: S4 not open");
     return false;
   }
+  if (on && !(w.valveOk[VSLOT_V_S5] && w.valve[VSLOT_V_S5] > 0.5f)) {   // batch 13.1: tank -> pump path
+    clearSay(w, "%s", "pump: S5 not open");
+    return false;
+  }
   return manPumpWrite(w, on, on ? "pump started" : "pump stopped", true);
+}
+
+//  batch 13.1: S5 (Air_S5, BOOL) sits between the collector and the pump.
+//  Closing it with the pump running stops the pump first, like S4.
+static bool manS5(PlcSnapshot& w, bool on) {
+  if (on && w.actionWord != 0) { clearSay(w, "%s", "manual: cycle running"); return false; }
+  if (!on && !s_manOwnS5)      { clearSay(w, "%s", "S5: not a manual output"); return false; }
+  bool pumpOn = s_manPumpActive || (w.valveOk[VSLOT_P_COND] && w.valve[VSLOT_P_COND] > 0.5f);
+  bool stoppedPump = false;
+  if (!on && pumpOn) {
+    stoppedPump = manPumpWrite(w, false, "pump stopped", true);
+    if (!stoppedPump) return false;
+  }
+  bool ok = eip.writeBool(TAG_V_S5, on);
+  if (!ok)              clearSay(w, "write %s failed", TAG_V_S5);
+  else if (stoppedPump) clearSay(w, "%s", "S5 closed, pump stopped");
+  else                  clearSay(w, "%s", on ? "S5 opened" : "S5 closed");
+  if (ok) { manArm(2, on); s_manOwnS5 = on; }
+  return ok;
 }
 
 //  PLC gone: drop the read-back checks (a verdict after a reconnect would
 //  judge a bit that changed for other reasons) but KEEP the pump ownership
 //  and its start time (review I3): if the pump is still running when the
 //  link returns, the level-18 / 180 s stop must still apply.
-static void manDisarm() { s_manChk[0] = s_manChk[1] = false; }
+static void manDisarm() { for (uint8_t i = 0; i < MAN_N; i++) s_manChk[i] = false; }
 
 //  After pollValvesInto(), PLC connected: auto-stop first, then the verdicts
 //  (only for sweeps that started after the due time, as in clearVerifyTick),
@@ -444,25 +474,24 @@ static void manualTick(PlcSnapshot& w) {
       wdWherePlc(WD_AT_VALVES);
     }
   }
-  for (uint8_t i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < MAN_N; i++) {
     if (!s_manChk[i] || (long)(s_valveSweepStartMs - s_manDueMs[i]) < 0) continue;
     s_manChk[i] = false;
-    const uint8_t slot = (i == 0) ? VSLOT_POS_S4 : VSLOT_P_COND;
-    const char* who = (i == 0) ? "S4" : TAG_P_COND;
+    const uint8_t slot = MAN_SLOT[i];
     if ((long)(now - s_manDueMs[i]) > (long)CLEAR_VERIFY_STALE_MS || !w.valveOk[slot]) {
-      clearSay(w, "%s unverified", who);           // review I6: too late or unread -> no judgement
+      clearSay(w, "%s unverified", MAN_WHO[i]);    // review I6: too late or unread -> no judgement
       continue;
     }
-    bool actual = (i == 0) ? (w.valve[slot] >= 50.0f) : (w.valve[slot] > 0.5f);
-    if (actual != s_manExpect[i]) {
-      clearSay(w, "%s re-asserted by PLC", who);
-      if (i == 0) s_manOwnS4 = false; else s_manPumpActive = false;
+    if (manReadOn(w, i) != s_manExpect[i]) {
+      clearSay(w, "%s re-asserted by PLC", MAN_WHO[i]);
+      if (i == 0) s_manOwnS4 = false; else if (i == 1) s_manPumpActive = false; else s_manOwnS5 = false;
     }
   }
   //  Outside a verdict window, an output we own that reads OFF was taken
   //  back by the PLC (its own stop, a download, a reset): ownership ends.
-  if (s_manOwnS4 && !s_manChk[0] && w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] < 50.0f) s_manOwnS4 = false;
-  if (s_manPumpActive && !s_manChk[1] && w.valveOk[VSLOT_P_COND] && w.valve[VSLOT_P_COND] < 0.5f) s_manPumpActive = false;
+  if (s_manOwnS4      && !s_manChk[0] && w.valveOk[MAN_SLOT[0]] && !manReadOn(w, 0)) s_manOwnS4      = false;
+  if (s_manPumpActive && !s_manChk[1] && w.valveOk[MAN_SLOT[1]] && !manReadOn(w, 1)) s_manPumpActive = false;
+  if (s_manOwnS5      && !s_manChk[2] && w.valveOk[MAN_SLOT[2]] && !manReadOn(w, 2)) s_manOwnS5      = false;
 }
 
 // ---------------------------------------------------------------------
@@ -543,6 +572,7 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
     case CMD_CLEAR_GEN_ERROR:   ok = clearFault(w, 2); break;
     case CMD_MAN_S4:            ok = manS4(w, on);     break;   // batch 13
     case CMD_MAN_PUMP:          ok = manPump(w, on);   break;
+    case CMD_MAN_S5:            ok = manS5(w, on);     break;   // batch 13.1
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;

@@ -57,7 +57,7 @@ static void cloudSideAssign() {
   TAKE(27, tankLevel);
 
   // ---- valve sweep: slot order == VALVE_TAGS -------------------------------
-  TAKE_VB( 0, valveS1);    TAKE_VB( 1, valveS5);   TAKE_VB( 2, valveS6);
+  TAKE_VB( 0, valveS1);    TAKE_VB(VSLOT_V_S5, valveS5);   TAKE_VB( 2, valveS6);
   TAKE_VB( 3, valveS7);    TAKE_VB( 4, valveS10);
   TAKE_VB( 5, valveV1A);   TAKE_VB( 6, valveV1B);
   TAKE_VB( 7, valveV2A1);  TAKE_VB( 8, valveV2A2); TAKE_VB( 9, valveV2B);
@@ -76,8 +76,10 @@ static void cloudSideAssign() {
   if (!ctrlManualHoldActive(s_local.stampMs)) {
     bool s4 = s_local.valveOk[VSLOT_POS_S4] ? (s_local.valve[VSLOT_POS_S4] >= 50.0f) : (bool)manS4Open;
     bool pu = s_local.valveOk[VSLOT_P_COND]  ? (s_local.valve[VSLOT_P_COND]  >  0.5f) : (bool)manCondPump;
+    bool s5 = s_local.valveOk[VSLOT_V_S5]    ? (s_local.valve[VSLOT_V_S5]    >  0.5f) : (bool)manS5Open;
     if ((bool)manS4Open   != s4) manS4Open   = s4;
     if ((bool)manCondPump != pu) manCondPump = pu;
+    if ((bool)manS5Open   != s5) manS5Open   = s5;
   }
   TAKE_VF(22, hmiWaterTotal); TAKE_VF(23, cumulativeWaterVolume);
   TAKE_VB(VSLOT_PRESS_ERROR, pressError); TAKE_VB(VSLOT_TEMP_ERROR, tempError); TAKE_VB(VSLOT_GEN_ERROR, genError);

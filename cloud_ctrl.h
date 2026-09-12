@@ -225,6 +225,10 @@ void onManCondPumpChange() {
   const PlcSnapshot& s = cloudSideSnapshot();
   ctrlManual(manCondPump, CMD_MAN_PUMP, "manCondPump", s.valveOk[VSLOT_P_COND] && s.valve[VSLOT_P_COND] > 0.5f);
 }
+void onManS5OpenChange() {
+  const PlcSnapshot& s = cloudSideSnapshot();
+  ctrlManual(manS5Open, CMD_MAN_S5, "manS5Open", s.valveOk[VSLOT_V_S5] && s.valve[VSLOT_V_S5] > 0.5f);
+}
 
 //  batch 12: momentary clear-fault buttons. Same three gates as the machine
 //  controls (a fault bit reset may let stopped equipment restart), momentary

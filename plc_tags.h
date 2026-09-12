@@ -203,6 +203,7 @@ static constexpr const char* const VALVE_TAGS[] = {   // constexpr so the VSLOT_
 #define VSLOT_TEMP_ERROR  25  // VALVE_TAGS[25] == TAG_TEMP_ERROR
 #define VSLOT_GEN_ERROR   26  // VALVE_TAGS[26] == TAG_GEN_ERROR
 #define VSLOT_POS_S4      17  // VALVE_TAGS[17] == TAG_POS_S4  (batch 13 manual drain interlock + read-back)
+#define VSLOT_V_S5         1  // VALVE_TAGS[1]  == TAG_V_S5    (batch 13.1: tank -> pump valve)
 
 //  State sweep: 15 Action bits then 12 button/state/fan/door bits.
 //  plcActionWord bit N = Action_(N+1); plcStateWord bit order is FIXED
@@ -232,6 +233,7 @@ static_assert(tagSlotIs(VALVE_TAGS[VSLOT_PRESS_ERROR], TAG_PRESS_ERROR), "VSLOT_
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_TEMP_ERROR],  TAG_TEMP_ERROR),  "VSLOT_TEMP_ERROR drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_GEN_ERROR],   TAG_GEN_ERROR),   "VSLOT_GEN_ERROR drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_POS_S4],      TAG_POS_S4),      "VSLOT_POS_S4 drifted");
+static_assert(tagSlotIs(VALVE_TAGS[VSLOT_V_S5],        TAG_V_S5),        "VSLOT_V_S5 drifted");
 static_assert(N_STATE == 27,  "15 actions + 12 state bits");
 static_assert(N_ACTION < N_STATE, "action bits come first");
 
