@@ -172,6 +172,22 @@ void onDesorpTimeMsChange() {
   ctrlPost(CMD_DESORP_TIME_MS, false, (float)mins, "desorpTime");
 }
 
+//  batch 12: momentary clear-fault buttons. Same three gates as the machine
+//  controls (a fault bit reset may let stopped equipment restart), momentary
+//  like flowResetTotal: only a true acts, and the switch is always written
+//  back false so a replayed true after reconnect cannot fire twice.
+static void ctrlClearFault(CloudBool& prop, uint16_t tag, const char* what) {
+  SHARED_ASSERT_ON_CLOUD();
+  if (!(bool)prop) return;
+  LOG("[CTRL] "); LOG(what); LOGLN(" pressed");
+  if (ctrlGate(what)) ctrlPost(tag, true, 1.0f, what);
+  prop = false;
+}
+
+void onClearPressErrorChange() { ctrlClearFault(clearPressError, CMD_CLEAR_PRESS_ERROR, "clearPressError"); }
+void onClearTempErrorChange()  { ctrlClearFault(clearTempError,  CMD_CLEAR_TEMP_ERROR,  "clearTempError");  }
+void onClearGenErrorChange()   { ctrlClearFault(clearGenError,   CMD_CLEAR_GEN_ERROR,   "clearGenError");   }
+
 //  Momentary reset of the water totals. NOT behind controlEnabled: that gate
 //  means "a human is operating the machine remotely"; zeroing a counter is
 //  bookkeeping. The quiet period still applies -- a replayed true must not

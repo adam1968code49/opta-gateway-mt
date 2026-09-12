@@ -2,7 +2,7 @@
 // =====================================================================
 //  Batch 1 property set: the 43 of batch 0 plus valves / pumps /
 //  positions, fault flags, heat-pump St_* status bits, PLC state words,
-//  cycle timers, and the eight READWRITE controls (seven machine controls and flowResetTotal) with their callbacks.
+//  cycle timers, and the eleven READWRITE controls (seven machine controls, three clear-fault buttons, flowResetTotal) with their callbacks.
 //  Declarations and registrations are verbatim from
 //  opta-plc-gateway-ip2/thingProperties.h so the same Thing and dashboard
 //  keep working. Still absent (later batches): water accounting writes,
@@ -169,6 +169,12 @@ CloudBool  systemRun;          // ON -> Start_Button = true (start auto cycle)
 CloudBool  stopButton;         // -> Stop_Button
 CloudBool  resetButton;        // -> Reset_Button
 CloudBool  purgeButton;        // -> Purge_Button
+// ---- batch 12: momentary clear-fault buttons (dashboard -> PLC writes 0) ---
+//  Behind the same gates as the machine controls: a fault bit reset may let
+//  stopped equipment restart. Written back false the moment they are seen.
+CloudBool  clearPressError;    // -> Press_Error := 0, then read back
+CloudBool  clearTempError;     // -> Temp_Error  := 0, then read back
+CloudBool  clearGenError;      // -> Gen_Error   := 0, then read back
 CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
 CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 5-60
 
@@ -205,6 +211,9 @@ void onDesorpTimeMsChange();
 void onFlowResetTotalChange();
 void onHpEnableChange();
 void onHpModeCoolChange();
+void onClearPressErrorChange();
+void onClearTempErrorChange();
+void onClearGenErrorChange();
 
 void initProperties() {
   // --- sensors ---
@@ -357,6 +366,9 @@ void initProperties() {
   ArduinoCloud.addProperty(stopButton,     READWRITE, ON_CHANGE, onStopButtonChange);
   ArduinoCloud.addProperty(resetButton,    READWRITE, ON_CHANGE, onResetButtonChange);
   ArduinoCloud.addProperty(purgeButton,    READWRITE, ON_CHANGE, onPurgeButtonChange);
+  ArduinoCloud.addProperty(clearPressError, READWRITE, ON_CHANGE, onClearPressErrorChange);   // batch 12
+  ArduinoCloud.addProperty(clearTempError,  READWRITE, ON_CHANGE, onClearTempErrorChange);
+  ArduinoCloud.addProperty(clearGenError,   READWRITE, ON_CHANGE, onClearGenErrorChange);
   ArduinoCloud.addProperty(adsorpTimeMs,   READWRITE, ON_CHANGE, onAdsorpTimeMsChange);
   ArduinoCloud.addProperty(desorpTimeMs,   READWRITE, ON_CHANGE, onDesorpTimeMsChange);
 

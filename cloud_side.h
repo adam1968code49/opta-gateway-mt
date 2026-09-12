@@ -67,7 +67,7 @@ static void cloudSideAssign() {
   TAKE_VF(18, posS8);  TAKE_VF(19, posS9);
   TAKE_VF(20, posV10); TAKE_VF(21, posV11);
   TAKE_VF(22, hmiWaterTotal); TAKE_VF(23, cumulativeWaterVolume);
-  TAKE_VB(24, pressError); TAKE_VB(25, tempError); TAKE_VB(26, genError);
+  TAKE_VB(VSLOT_PRESS_ERROR, pressError); TAKE_VB(VSLOT_TEMP_ERROR, tempError); TAKE_VB(VSLOT_GEN_ERROR, genError);
   TAKE_VB(27, stStage1);     TAKE_VB(28, stStage2);     TAKE_VB(29, stAuxHeat);
   TAKE_VB(30, stIndoorCirc); TAKE_VB(31, stIndoorFlow); TAKE_VB(32, stOutdoorFlow);
   TAKE_VB(33, stLockout);    TAKE_VB(34, stPhaseFault); TAKE_VB(35, stBACnetControl);

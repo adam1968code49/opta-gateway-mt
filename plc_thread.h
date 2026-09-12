@@ -281,6 +281,48 @@ static void pollHeatPumpInto(PlcSnapshot& w) {
 }
 
 // ---------------------------------------------------------------------
+//  batch 12: clear-fault write + read-back. The PLC program decides whether
+//  Press_Error & co. are latched (a 0 sticks) or rewritten every scan (a 0
+//  is gone before the next read). Rather than assume, write 0, wait two
+//  sample periods so a full valve sweep lands after the write, and report
+//  what came back. PLC thread only; fixed arrays, no allocation.
+// ---------------------------------------------------------------------
+#define CLEAR_VERIFY_MS 4000UL
+#define CLEAR_N 3
+static const char* const  CLEAR_TAG[CLEAR_N]  = { TAG_PRESS_ERROR, TAG_TEMP_ERROR, TAG_GEN_ERROR };
+static const uint8_t      CLEAR_SLOT[CLEAR_N] = { VSLOT_PRESS_ERROR, VSLOT_TEMP_ERROR, VSLOT_GEN_ERROR };
+static bool               s_clearPending[CLEAR_N] = { false, false, false };
+static unsigned long      s_clearDueMs[CLEAR_N]   = { 0, 0, 0 };
+
+//  Shared by the three CMD_CLEAR_* cases: write, report, arm the read-back.
+static bool clearFault(PlcSnapshot& w, uint8_t i) {
+  bool ok = eip.writeBool(CLEAR_TAG[i], false);
+  if (ok) snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s cleared", CLEAR_TAG[i]);
+  else    snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "write %s failed", CLEAR_TAG[i]);
+  if (ok) { s_clearPending[i] = true; s_clearDueMs[i] = millis() + CLEAR_VERIFY_MS; }
+  return ok;
+}
+
+//  After pollValvesInto(): report the read-back for every armed clear that
+//  has waited its two periods. Runs only with the PLC connected (caller).
+static void clearVerifyTick(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
+  unsigned long now = millis();
+  for (uint8_t i = 0; i < CLEAR_N; i++) {
+    if (!s_clearPending[i] || (long)(now - s_clearDueMs[i]) < 0) continue;
+    s_clearPending[i] = false;
+    const uint8_t slot = CLEAR_SLOT[i];
+    if (!w.valveOk[slot])
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s clear unverified", CLEAR_TAG[i]);
+    else if (w.valve[slot] > 0.5f)
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s re-asserted by PLC", CLEAR_TAG[i]);
+    else
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s clear confirmed", CLEAR_TAG[i]);
+    LOG("[CTRL] "); LOGLN(w.lastError);
+  }
+}
+
+// ---------------------------------------------------------------------
 //  Commands from main. The gate is checked again here: a controlEnabled
 //  that went false between the post and this tick drops the queue. Every
 //  write reports into w.lastError with the old firmware's wording so the
@@ -353,6 +395,9 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
       if (ok) LOGLN("[FLOW] all water totals reset (gateway + PLC lifetime, trip, history)");
       break;
 #endif
+    case CMD_CLEAR_PRESS_ERROR: ok = clearFault(w, 0); break;   // batch 12
+    case CMD_CLEAR_TEMP_ERROR:  ok = clearFault(w, 1); break;
+    case CMD_CLEAR_GEN_ERROR:   ok = clearFault(w, 2); break;
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;
@@ -452,6 +497,7 @@ static void plcThreadBody() {
       pollSensorsInto(w);
       if (eip.connected()) {
         pollValvesInto(w);
+        clearVerifyTick(w);                   // batch 12: read-back of any clear written >= 4 s ago
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
         if (tickN % STATE_EVERY_TICKS == 1) pollHeatPumpInto(w);
 #if FLOW_TO_PLC_ENABLE

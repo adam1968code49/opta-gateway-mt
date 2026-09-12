@@ -199,6 +199,9 @@ static const char* const VALVE_TAGS[] = {
 };
 #define N_VALVE (sizeof(VALVE_TAGS) / sizeof(VALVE_TAGS[0]))
 #define VSLOT_P_COND  11      // VALVE_TAGS[11] == TAG_P_COND  (Lefoo condensate pump)
+#define VSLOT_PRESS_ERROR 24  // VALVE_TAGS[24] == TAG_PRESS_ERROR  (batch 12 read-back after clear)
+#define VSLOT_TEMP_ERROR  25  // VALVE_TAGS[25] == TAG_TEMP_ERROR
+#define VSLOT_GEN_ERROR   26  // VALVE_TAGS[26] == TAG_GEN_ERROR
 
 //  State sweep: 15 Action bits then 12 button/state/fan/door bits.
 //  plcActionWord bit N = Action_(N+1); plcStateWord bit order is FIXED
