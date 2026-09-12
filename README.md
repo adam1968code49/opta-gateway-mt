@@ -117,6 +117,12 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   "IP2 AWG v8" (ee836a7b) built from the v7 CLI template with the buttons under the fault Status widgets (REST
   PUT drops pages -> mobile breaks, so v7 was not edited). genError was TRUE on the machine at the time; the
   confirmed/re-asserted branch is Adam's to exercise. See docs/batch12-final-review.md.
+- 2026-09-11 21:38 PT batch 13 on IP2 via OTA, fw 2bb5f73: manual drain switches manS4Open (Air_S4_Output REAL
+  100/0) and manCondPump (Cond_Pump) behind the machine-control gates plus a sequencer-idle gate; pump interlocked
+  on S4 read back open, auto-stop at collector level < 18 or 180 s; 4 s read-back verdicts; switches mirror the
+  PLC's real outputs and only a gateway-switched output may be switched off (review C1). Boot counter n=80 -> 81.
+  At boot: S4 0, pump off, sequencer idle, tankLevel 78.5 after three cycles aborted before their discharge step.
+  Dashboard "IP2 AWG v9" (9d4dc360). The drain itself is Adam's to run. See docs/batch13-final-review.md.
 
 ## CI
 
