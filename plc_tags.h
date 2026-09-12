@@ -184,7 +184,7 @@ static_assert(sizeof(DINT_SLOT) / sizeof(DINT_SLOT[0]) == N_DINT,
 
 //  Valve / pump / position sweep. Slot order is a contract with
 //  cloud_side.h's TAKE_V* list; verbatim from the old VALVE_TAGS.
-static const char* const VALVE_TAGS[] = {
+static constexpr const char* const VALVE_TAGS[] = {   // constexpr so the VSLOT_* asserts below can read it
   TAG_V_S1,   TAG_V_S5,   TAG_V_S6,   TAG_V_S7,   TAG_V_S10,      //  0.. 4
   TAG_V_V1A,  TAG_V_V1B,  TAG_V_V2A1, TAG_V_V2A2, TAG_V_V2B,      //  5.. 9
   TAG_P_SCROLL, TAG_P_COND, TAG_P_HOTW, TAG_P_COLDW,              // 10..13
@@ -219,6 +219,17 @@ static const char* const STATE_TAGS[] = {
 #define N_ACTION 15
 
 static_assert(N_VALVE == 36,  "cloud_side.h TAKE_V* list covers 36 valve slots");
+//  batch 12: the VSLOT_* indices are how the read-back finds the fault bits
+//  and how cloud_side routes pressError & co. Tie them to the tag text at
+//  compile time so inserting a tag into VALVE_TAGS cannot silently shift
+//  them (review I3). Loop, not recursion: the project bans recursion even here.
+constexpr bool tagSlotIs(const char* a, const char* b) {
+  for (;; ++a, ++b) { if (*a != *b) return false; if (*a == '\0') return true; }
+}
+static_assert(tagSlotIs(VALVE_TAGS[VSLOT_P_COND],      TAG_P_COND),      "VSLOT_P_COND drifted");
+static_assert(tagSlotIs(VALVE_TAGS[VSLOT_PRESS_ERROR], TAG_PRESS_ERROR), "VSLOT_PRESS_ERROR drifted");
+static_assert(tagSlotIs(VALVE_TAGS[VSLOT_TEMP_ERROR],  TAG_TEMP_ERROR),  "VSLOT_TEMP_ERROR drifted");
+static_assert(tagSlotIs(VALVE_TAGS[VSLOT_GEN_ERROR],   TAG_GEN_ERROR),   "VSLOT_GEN_ERROR drifted");
 static_assert(N_STATE == 27,  "15 actions + 12 state bits");
 static_assert(N_ACTION < N_STATE, "action bits come first");
 

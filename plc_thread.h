@@ -136,9 +136,11 @@ static void pollSensorsInto(PlcSnapshot& w) {
 //  Valves, pumps, positions, fault flags, heat-pump St_* bits: 36 tags,
 //  three MSP chunks, straight into w.valve[] / w.valveOk[].
 // ---------------------------------------------------------------------
+static unsigned long s_valveSweepStartMs = 0;   // batch 12: clearVerifyTick judges only sweeps that began after the due time
 static void pollValvesInto(PlcSnapshot& w) {
   SHARED_ASSERT_ON_PLC();
   wdWherePlc(WD_AT_VALVES);
+  s_valveSweepStartMs = millis();
   for (size_t k = 0; k < N_VALVE; k++) w.valveOk[k] = false;
 
   beatReadReals(VALVE_TAGS, w.valve, w.valveOk, N_VALVE);
@@ -287,38 +289,70 @@ static void pollHeatPumpInto(PlcSnapshot& w) {
 //  sample periods so a full valve sweep lands after the write, and report
 //  what came back. PLC thread only; fixed arrays, no allocation.
 // ---------------------------------------------------------------------
-#define CLEAR_VERIFY_MS 4000UL
+#define CLEAR_VERIFY_MS       4000UL   // two sample periods: a whole valve sweep starts after the write
+#define CLEAR_VERIFY_STALE_MS 15000UL  // due time this long gone (PLC was away) -> "unverified", not a verdict
+#define CLEAR_HOLD_MS         60000UL  // how long the last message stays visible in the "ok" gaps
 #define CLEAR_N 3
 static const char* const  CLEAR_TAG[CLEAR_N]  = { TAG_PRESS_ERROR, TAG_TEMP_ERROR, TAG_GEN_ERROR };
 static const uint8_t      CLEAR_SLOT[CLEAR_N] = { VSLOT_PRESS_ERROR, VSLOT_TEMP_ERROR, VSLOT_GEN_ERROR };
 static bool               s_clearPending[CLEAR_N] = { false, false, false };
 static unsigned long      s_clearDueMs[CLEAR_N]   = { 0, 0, 0 };
+//  Latched text (review I1): pollSensorsInto rewrites lastError to "ok"
+//  every tick, so a one-tick message lives in exactly one snapshot and a
+//  cloud pass that happens to be blocked (WiFi begin, TLS, OTA) never sees
+//  it. Same overlay rule as flow_watch: shown only where lastError is "ok",
+//  so real errors still win.
+static char               s_clearText[PlcSnapshot::LASTERR_CAP] = "";
+static unsigned long      s_clearTextUntil = 0;
+static bool               s_clearTextOn    = false;
+
+static void clearSay(PlcSnapshot& w, const char* fmt, const char* tag) {
+  snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, fmt, tag);
+  snprintf(s_clearText, sizeof s_clearText, "%s", w.lastError);
+  s_clearTextUntil = millis() + CLEAR_HOLD_MS;
+  s_clearTextOn    = true;
+  LOG("[CTRL] "); LOGLN(w.lastError);
+}
 
 //  Shared by the three CMD_CLEAR_* cases: write, report, arm the read-back.
 static bool clearFault(PlcSnapshot& w, uint8_t i) {
+  SHARED_ASSERT_ON_PLC();
   bool ok = eip.writeBool(CLEAR_TAG[i], false);
-  if (ok) snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s cleared", CLEAR_TAG[i]);
-  else    snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "write %s failed", CLEAR_TAG[i]);
+  clearSay(w, ok ? "%s cleared" : "write %s failed", CLEAR_TAG[i]);
   if (ok) { s_clearPending[i] = true; s_clearDueMs[i] = millis() + CLEAR_VERIFY_MS; }
   return ok;
 }
 
-//  After pollValvesInto(): report the read-back for every armed clear that
-//  has waited its two periods. Runs only with the PLC connected (caller).
+//  PLC gone (review I2): a verdict read after a reconnect or a PLC download
+//  would describe a bit that changed for unrelated reasons. Drop the arming;
+//  the "cleared" text stays on screen so the operator knows to look again.
+static void clearDisarm() {
+  for (uint8_t i = 0; i < CLEAR_N; i++) s_clearPending[i] = false;
+}
+
+//  After pollValvesInto(): report the read-back for every armed clear whose
+//  sweep STARTED after the due time (review M4: a sweep that started 100 ms
+//  after the write but dragged past 4 s on retries read the bit before the
+//  PLC's next scan could re-assert it). Runs only with the PLC connected.
 static void clearVerifyTick(PlcSnapshot& w) {
   SHARED_ASSERT_ON_PLC();
   unsigned long now = millis();
   for (uint8_t i = 0; i < CLEAR_N; i++) {
-    if (!s_clearPending[i] || (long)(now - s_clearDueMs[i]) < 0) continue;
+    if (!s_clearPending[i] || (long)(s_valveSweepStartMs - s_clearDueMs[i]) < 0) continue;
     s_clearPending[i] = false;
     const uint8_t slot = CLEAR_SLOT[i];
-    if (!w.valveOk[slot])
-      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s clear unverified", CLEAR_TAG[i]);
+    if ((long)(now - s_clearDueMs[i]) > (long)CLEAR_VERIFY_STALE_MS || !w.valveOk[slot])
+      clearSay(w, "%s clear unverified", CLEAR_TAG[i]);
     else if (w.valve[slot] > 0.5f)
-      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s re-asserted by PLC", CLEAR_TAG[i]);
+      clearSay(w, "%s re-asserted by PLC", CLEAR_TAG[i]);
     else
-      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s clear confirmed", CLEAR_TAG[i]);
-    LOG("[CTRL] "); LOGLN(w.lastError);
+      clearSay(w, "%s clear confirmed", CLEAR_TAG[i]);
+  }
+  //  Overlay the latched text into the "ok" gaps for CLEAR_HOLD_MS.
+  if (s_clearTextOn) {
+    if ((long)(now - s_clearTextUntil) >= 0) s_clearTextOn = false;
+    else if (strcmp(w.lastError, "ok") == 0)
+      snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "%s", s_clearText);
   }
 }
 
@@ -465,6 +499,7 @@ static void plcThreadBody() {
       //  last tick's values as fresh.
       for (size_t k = 0; k < N_SENSORS; k++) w.ok[k] = false;
       for (size_t k = 0; k < N_VALVE;   k++) w.valveOk[k] = false;
+      clearDisarm();                          // batch 12: no verdict on a bit read after a reconnect
       if (tick0 - lastReconnect >= reconnectWait) {
         lastReconnect = tick0;
         wdWherePlc(WD_AT_PLCPROBE);
