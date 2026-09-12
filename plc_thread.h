@@ -423,13 +423,13 @@ static bool manS4(PlcSnapshot& w, bool on) {
 static bool manPump(PlcSnapshot& w, bool on) {
   if (on && w.actionWord != 0)  { clearSay(w, "%s", "manual: cycle running"); return false; }
   if (!on && !s_manPumpActive)  { clearSay(w, "%s", "pump: not a manual output"); return false; }
-  if (on && !(w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] >= 50.0f)) {
-    clearSay(w, "%s", "pump: S4 not open");
-    return false;
-  }
-  if (on && !(w.valveOk[VSLOT_V_S5] && w.valve[VSLOT_V_S5] > 0.5f)) {   // batch 13.1: tank -> pump path
-    clearSay(w, "%s", "pump: S5 not open");
-    return false;
+  if (on) {                                   // both the vent (S4) and the suction valve (S5) must read open
+    bool s4 = w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] >= 50.0f;
+    bool s5 = w.valveOk[VSLOT_V_S5]   && w.valve[VSLOT_V_S5]   >  0.5f;
+    if (!s4 || !s5) {
+      clearSay(w, "%s", (!s4 && !s5) ? "pump: S4/S5 not open" : (!s4 ? "pump: S4 not open" : "pump: S5 not open"));
+      return false;
+    }
   }
   return manPumpWrite(w, on, on ? "pump started" : "pump stopped", true);
 }
@@ -492,6 +492,20 @@ static void manualTick(PlcSnapshot& w) {
   if (s_manOwnS4      && !s_manChk[0] && w.valveOk[MAN_SLOT[0]] && !manReadOn(w, 0)) s_manOwnS4      = false;
   if (s_manPumpActive && !s_manChk[1] && w.valveOk[MAN_SLOT[1]] && !manReadOn(w, 1)) s_manPumpActive = false;
   if (s_manOwnS5      && !s_manChk[2] && w.valveOk[MAN_SLOT[2]] && !manReadOn(w, 2)) s_manOwnS5      = false;
+  //  batch 13.1 review: a valve the manual pump depends on (S4 vent, S5
+  //  suction) read closed by ANYONE -- the PLC re-asserting it, as it does
+  //  with Cond_Pump -- stops the pump at once. Otherwise the Lefoo would
+  //  dead-head against a closed suction line for the full 180 s: the level
+  //  cannot fall, so the level stop never fires.
+  for (uint8_t i = 0; i < MAN_N; i += 2) {           // 0 = S4, 2 = S5
+    if (s_manPumpActive && !s_manChk[i] && w.valveOk[MAN_SLOT[i]] && !manReadOn(w, i)) {
+      char why[32];
+      snprintf(why, sizeof why, "pump stopped: %s closed", MAN_WHO[i]);
+      wdWherePlc(WD_AT_CIPWRITE);
+      manPumpWrite(w, false, why, false);
+      wdWherePlc(WD_AT_VALVES);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------
