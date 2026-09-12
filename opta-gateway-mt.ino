@@ -41,7 +41,7 @@
 #include "cloud_thread.h"
 static_assert(N_VALVE == 36 && N_STATE == 31 && N_ACTION == 15, "sweep tables: batch 14 appended four door-open indicators");
 static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
-static_assert(sizeof(PlcSnapshot) < 960, "snapshot grew past 960 B");
+static_assert(sizeof(PlcSnapshot) < 1088, "snapshot grew past 1088 B");   // batch 15 added doorState[4] + lacoStat[64]
 static_assert(DESORP_TIME_MIN_MIN == 5 && ADSORP_TIME_MIN_MIN == 5, "clamp floor is 5 min for both timers");
 static_assert(sizeof(TRIP_HIST_TAGS) / sizeof(TRIP_HIST_TAGS[0]) == TRIP_HIST_N, "five history tags, newest first");
 static_assert(N_HP_REAL == 29 && N_HP_BOOL == 11, "batch 5 heat-pump tables");

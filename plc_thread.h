@@ -202,11 +202,13 @@ static void pollPlcStateInto(PlcSnapshot& w) {
     for (size_t s = 0; s < 4 && dused < dcap - 10; s++) {
       const size_t kc = SSLOT_DOOR_CLOSED0 + s, ko = SSLOT_DOOR_OPEN0 + s;
       const char* v;
-      if (!ok[kc] || !ok[ko])                             v = "?";
-      else if (vals[ko] > 0.5f && vals[kc] > 0.5f)        v = "??";
-      else if (vals[ko] > 0.5f)                           v = "open";
-      else if (vals[kc] > 0.5f)                           v = "shut";
-      else                                                v = "mid";
+      uint8_t     code;
+      if (!ok[kc] || !ok[ko])                      { v = "?";    code = DOOR_UNKNOWN;  }
+      else if (vals[ko] > 0.5f && vals[kc] > 0.5f) { v = "??";   code = DOOR_CONFLICT; }
+      else if (vals[ko] > 0.5f)                    { v = "open"; code = DOOR_OPEN;     }
+      else if (vals[kc] > 0.5f)                    { v = "shut"; code = DOOR_SHUT;     }
+      else                                         { v = "mid";  code = DOOR_MID;      }
+      w.doorState[s] = code;
       dused += snprintf(d + dused, dcap - dused, "%s%s:%s", s ? " " : "", SIDE_N[s], v);
     }
   }
@@ -531,6 +533,8 @@ static void manualTick(PlcSnapshot& w) {
   }
 }
 
+#include "laco_doors.h"      // batch 15: uses beatReadReals / clearSay / eip, all defined above
+
 // ---------------------------------------------------------------------
 //  Commands from main. The gate is checked again here: a controlEnabled
 //  that went false between the post and this tick drops the queue. Every
@@ -610,6 +614,8 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
     case CMD_MAN_S4:            ok = manS4(w, on);     break;   // batch 13
     case CMD_MAN_PUMP:          ok = manPump(w, on);   break;
     case CMD_MAN_S5:            ok = manS5(w, on);     break;   // batch 13.1
+    case CMD_MAN_TOPDOORS:      ok = lacoStart(w, true,  on); break;   // batch 15
+    case CMD_MAN_BOTDOORS:      ok = lacoStart(w, false, on); break;
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;
@@ -679,6 +685,7 @@ static void plcThreadBody() {
       for (size_t k = 0; k < N_VALVE;   k++) w.valveOk[k] = false;
       clearDisarm();                          // batch 12: no verdict on a bit read after a reconnect
       manDisarm();                            // batch 13: same, and the manual pump timer is void
+      lacoAbort();                            // batch 15: a door job in flight means nothing without the PLC
       if (tick0 - lastReconnect >= reconnectWait) {
         lastReconnect = tick0;
         wdWherePlc(WD_AT_PLCPROBE);
@@ -715,6 +722,8 @@ static void plcThreadBody() {
         manualTick(w);                        // batch 13: manual pump auto-stop + S4/pump read-back
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
         if (tickN % STATE_EVERY_TICKS == 1) pollHeatPumpInto(w);
+        if (tickN % STATE_EVERY_TICKS == 2) lacoPoll(w);   // batch 15: its own tick, its own failure count
+        lacoTick(w);                          // batch 15: staggered door writes, one side per tick
 #if FLOW_TO_PLC_ENABLE
         wdWherePlc(WD_AT_CIPWRITE);
         waterToPlc(w);                        // rate-limited inside to 5 s

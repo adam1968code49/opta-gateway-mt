@@ -113,6 +113,23 @@ static void cloudSideAssign() {
       snprintf(prevDoorStat, sizeof prevDoorStat, "%s", s_local.doorStat);
       doorStat = String(s_local.doorStat);
     }
+    //  batch 15: the PLC's LACO interface, and the two door switches
+    //  mirroring what the limits actually say (both sides open = ON).
+    static char prevLacoStat[PlcSnapshot::LACOSTAT_CAP] = "";
+    if (s_local.lacoStat[0] && strcmp(prevLacoStat, s_local.lacoStat) != 0) {
+      snprintf(prevLacoStat, sizeof prevLacoStat, "%s", s_local.lacoStat);
+      lacoStat = String(s_local.lacoStat);
+    }
+    //  A door job takes ~46 s (write A, 10 s of air recovery, write B, 30 s
+    //  to settle) and the sides read DOOR_MID for most of it. Mirroring
+    //  during that window would drop the switch to OFF and back, which an
+    //  operator reads as a refusal (review I1). lacoJobs says a job is in
+    //  flight for that chamber, and it clears on abort too, which a timer
+    //  would not.
+    bool topOpen = s_local.doorState[0] == DOOR_OPEN && s_local.doorState[1] == DOOR_OPEN;
+    bool botOpen = s_local.doorState[2] == DOOR_OPEN && s_local.doorState[3] == DOOR_OPEN;
+    if (!(s_local.lacoJobs & 1) && (bool)manTopDoors != topOpen) manTopDoors = topOpen;
+    if (!(s_local.lacoJobs & 2) && (bool)manBotDoors != botOpen) manBotDoors = botOpen;
     adsorpElapsedS    = (int)s_local.adsorpElapsedS;
     desorpElapsedT6S  = (int)s_local.desorpElapsedT6S;
     desorpElapsedT11S = (int)s_local.desorpElapsedT11S;

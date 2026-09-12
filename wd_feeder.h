@@ -49,6 +49,7 @@
 #define WD_AT_CLOUDCONN  15   // update() WiFi up, cloud down: DNS/TLS/NTP  cloud
 #define WD_AT_DIAG       16   // heartbeat print + 30 s diagnostics (WiFi.RSSI)  cloud
 #define WD_AT_SNAP       17   // snapshot take + Cloud* assignment + status reads  cloud
+#define WD_AT_LACO       18   // batch 15: the LACO command-bit sweep and door writes  plc
 
 static volatile uint8_t  s_whereMain   = WD_AT_NONE;   // written by main only
 static volatile uint8_t  s_wherePlc    = WD_AT_NONE;   // written by plc only

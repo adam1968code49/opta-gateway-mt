@@ -747,6 +747,34 @@
 //  door that is open from one stopped halfway or from a dead sensor. With
 //  the pair, each side resolves to open / shut / mid / sensor conflict --
 //  see doorStat.
+//  batch 15: the LACO door/clamp COMMAND bits inside the PLC's own Modbus
+//  master program (UDT_LACO, present in the 2026-09-02 controller export).
+//  The gateway does NOT speak Modbus to the LACO BOXIO: the PLC already
+//  rewrites all 24 LACO coils every 100 ms from LACO_CoilBytes, so a second
+//  master would simply be overwritten (the Cond_Pump lesson, 2026-09-11).
+//  Writing these bits puts the request where the PLC's R02_LacoMap picks it
+//  up, which is the only place a request survives.
+//    Cmd_ClampsOpen  1 = release the clamps, 0 = clamp
+//    Cmd_DoorOpen    1 = open the door,      0 = close it
+//  Read back on the same tags: the PLC program owns them, so a request that
+//  does not stick is visible rather than assumed.
+#define TAG_LACO_TOPA_CLAMPS "LACO.TopA.Cmd_ClampsOpen"
+#define TAG_LACO_TOPA_DOOR   "LACO.TopA.Cmd_DoorOpen"
+#define TAG_LACO_TOPB_CLAMPS "LACO.TopB.Cmd_ClampsOpen"
+#define TAG_LACO_TOPB_DOOR   "LACO.TopB.Cmd_DoorOpen"
+#define TAG_LACO_BOTA_CLAMPS "LACO.BotA.Cmd_ClampsOpen"
+#define TAG_LACO_BOTA_DOOR   "LACO.BotA.Cmd_DoorOpen"
+#define TAG_LACO_BOTB_CLAMPS "LACO.BotB.Cmd_ClampsOpen"
+#define TAG_LACO_BOTB_DOOR   "LACO.BotB.Cmd_DoorOpen"
+//  Air_OK = LACO DI 8 (pneumatic supply); Comm_OK = the PLC's Modbus link to
+//  the BOXIO is fresh. Both false when the LACO program is not running at
+//  all, which is exactly what the gateway must not mistake for "safe".
+#define TAG_LACO_AIR_OK      "LACO.Air_OK"
+#define TAG_LACO_COMM_OK     "LACO.Comm_OK"
+//  Chamber pressure must be back at ambient before a door is asked to open.
+//  Readings sit at 1010-1045 vented and 8-400 under vacuum, so 900 is far
+//  from both. LACO's own PLC also interlocks this; this is the near side.
+#define LACO_VENTED_MBAR     900.0f
 #define TAG_IND_TOPA_OPEN "Indicator_TopA_Open"
 #define TAG_IND_TOPB_OPEN "Indicator_TopB_Open"
 #define TAG_IND_BOTA_OPEN "Indicator_BotA_Open"

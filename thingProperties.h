@@ -99,6 +99,10 @@ CloudString plcStateText;
 //  CLOSED limit-switch pair: "TA:shut TB:shut BA:open BB:mid" (?? = both
 //  sensors on, ? = tag unread). Read-only; the PLC owns the doors.
 CloudString doorStat;
+//  batch 15: the PLC's own LACO interface -- "air:1 comm:1 TA:11 TB:11 BA:00
+//  BB:00" (per side: clamps,door as the PLC holds them). "LACO program not
+//  in the PLC" when none of those tags answer.
+CloudString lacoStat;
 CloudInt    adsorpElapsedS;    // Timer_3.ACC
 CloudInt    desorpElapsedT6S;  // Timer_6[3].ACC   (top chamber)
 CloudInt    desorpElapsedT11S; // Timer_11[3].ACC  (bottom chamber)
@@ -185,6 +189,10 @@ CloudBool  clearGenError;      // -> Gen_Error   := 0, then read back
 CloudBool  manS4Open;          // -> Air_S4_Output 100/0
 CloudBool  manCondPump;        // -> Cond_Pump, interlocked on S4 + S5 open, auto-stop at level 18 / 180 s
 CloudBool  manS5Open;          // -> Air_S5 (tank -> pump), BOOL
+//  batch 15: one switch per chamber, both of its LACO door sides. ON opens,
+//  OFF closes; side A first, side B ten seconds later (instrument air).
+CloudBool  manTopDoors;
+CloudBool  manBotDoors;
 CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
 CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 5-60
 
@@ -227,6 +235,8 @@ void onClearGenErrorChange();
 void onManS4OpenChange();
 void onManCondPumpChange();
 void onManS5OpenChange();
+void onManTopDoorsChange();
+void onManBotDoorsChange();
 
 void initProperties() {
   // --- sensors ---
@@ -311,6 +321,7 @@ void initProperties() {
   ArduinoCloud.addProperty(plcStateWord,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcStateText,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(doorStat,          READ, ON_CHANGE);   // batch 14
+  ArduinoCloud.addProperty(lacoStat,          READ, ON_CHANGE);   // batch 15
 
   // --- water accounting ---
   ArduinoCloud.addProperty(flowRate,           READ, 5 * SECONDS);
@@ -386,6 +397,8 @@ void initProperties() {
   ArduinoCloud.addProperty(manS4Open,   READWRITE, ON_CHANGE, onManS4OpenChange);      // batch 13
   ArduinoCloud.addProperty(manCondPump, READWRITE, ON_CHANGE, onManCondPumpChange);
   ArduinoCloud.addProperty(manS5Open,   READWRITE, ON_CHANGE, onManS5OpenChange);      // batch 13.1
+  ArduinoCloud.addProperty(manTopDoors, READWRITE, ON_CHANGE, onManTopDoorsChange);   // batch 15
+  ArduinoCloud.addProperty(manBotDoors, READWRITE, ON_CHANGE, onManBotDoorsChange);
   ArduinoCloud.addProperty(adsorpTimeMs,   READWRITE, ON_CHANGE, onAdsorpTimeMsChange);
   ArduinoCloud.addProperty(desorpTimeMs,   READWRITE, ON_CHANGE, onDesorpTimeMsChange);
 

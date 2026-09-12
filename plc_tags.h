@@ -105,7 +105,7 @@
 //  properties from them in this order. DO NOT reorder or resize without
 //  updating shared.h and cloud_side.h.
 // ---------------------------------------------------------------------
-static const char* const SENSOR_TAGS[] = {
+static constexpr const char* const SENSOR_TAGS[] = {   // constexpr: the SSLOT_* asserts read it
   TAG_T1, TAG_T2, TAG_T3, TAG_T4, TAG_T5, TAG_T6, TAG_T7, TAG_T8,   //  0.. 7
   TAG_T9, TAG_T10, TAG_T11, TAG_T12, TAG_VT,                        //  8..12
   TAG_P1, TAG_P2, TAG_P3, TAG_P4, TAG_P5, TAG_P6,                   // 13..18
@@ -119,6 +119,10 @@ static const char* const SENSOR_TAGS[] = {
 //  disables itself if they drift, so a reorder cannot silently watch the
 //  wrong tag.
 #define SSLOT_LEVEL   27      // SENSOR_TAGS[27] == TAG_LEVEL  (Collection_Tank_Level)
+//  batch 15: chamber pressures, the gateway's own "is it vented" check
+//  before a door is asked to open.
+#define SSLOT_P1_TOP  13      // SENSOR_TAGS[13] == TAG_P1  (top chamber)
+#define SSLOT_P2_BOT  14      // SENSOR_TAGS[14] == TAG_P2  (bottom chamber)
 
 // ---------------------------------------------------------------------
 //  IP2 sweep is split: 22 REAL points in one batched MSP call, 6 DINT raw
@@ -237,6 +241,9 @@ static_assert(tagSlotIs(VALVE_TAGS[VSLOT_TEMP_ERROR],  TAG_TEMP_ERROR),  "VSLOT_
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_GEN_ERROR],   TAG_GEN_ERROR),   "VSLOT_GEN_ERROR drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_POS_S4],      TAG_POS_S4),      "VSLOT_POS_S4 drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_V_S5],        TAG_V_S5),        "VSLOT_V_S5 drifted");
+static_assert(tagSlotIs(SENSOR_TAGS[SSLOT_LEVEL],      TAG_LEVEL),       "SSLOT_LEVEL drifted");
+static_assert(tagSlotIs(SENSOR_TAGS[SSLOT_P1_TOP],     TAG_P1),          "SSLOT_P1_TOP drifted");
+static_assert(tagSlotIs(SENSOR_TAGS[SSLOT_P2_BOT],     TAG_P2),          "SSLOT_P2_BOT drifted");
 static_assert(N_STATE == 31,  "15 actions + 12 state bits + 4 door-open indicators (batch 14)");
 //  Door indicator slots: closed at 23..26, open at 27..30 (stateWord bits
 //  8..11 and 12..15). doorStat pairs them side by side.

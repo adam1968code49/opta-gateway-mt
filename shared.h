@@ -38,6 +38,7 @@ struct PlcSnapshot {
   static constexpr size_t FAILTAG_CAP   = 40;
   static constexpr size_t STATETEXT_CAP = 128;
   static constexpr size_t DOORSTAT_CAP  = 40;   // "TA:shut TB:shut BA:open BB:mid" + room for '?'
+  static constexpr size_t LACOSTAT_CAP  = 64;   // "air:1 comm:1 TA:11 TB:11 BA:00 BB:00"
 
   uint32_t seq;            // monotonic, bumped on every publish
   uint32_t stampMs;        // millis() at publish, so main can age it
@@ -59,6 +60,9 @@ struct PlcSnapshot {
   uint32_t stateWord;                  // Start,Stop,Reset,Purge,State_1,State_2,Fan1,Fan2,TopA,TopB,BotA,BotB
   char     stateText[STATETEXT_CAP];   // one line, '?' prefix when a tag was unread
   char     doorStat[DOORSTAT_CAP];     // batch 14: "TA:shut TB:shut BA:open BB:mid" from the open+closed pairs
+  uint8_t  doorState[4];               // batch 15: the same four sides as DOOR_* codes, for the door logic
+  char     lacoStat[LACOSTAT_CAP];     // batch 15: the PLC's LACO command bits + air / link status
+  uint8_t  lacoJobs;                   // batch 15: bit 0 = a top-door job in flight, bit 1 = bottom
   int32_t  stateFails;
   uint32_t stateSeq;                   // +1 each time the state sweep ran; main assigns only on change
   int32_t  adsorpElapsedS;             // Timer_3.ACC / 1000
@@ -130,6 +134,17 @@ enum CmdTag : uint16_t {
   CMD_CLEAR_PRESS_ERROR, CMD_CLEAR_TEMP_ERROR, CMD_CLEAR_GEN_ERROR,   // batch 12: write the fault BOOL to 0
   CMD_MAN_S4, CMD_MAN_PUMP,                                          // batch 13: manual drain (S4 vent, Lefoo pump)
   CMD_MAN_S5,                                                        // batch 13.1: tank -> pump valve
+  CMD_MAN_TOPDOORS, CMD_MAN_BOTDOORS,                                // batch 15: one chamber's two LACO door sides
+};
+
+//  batch 15: a door side resolved from its OPEN + CLOSED limit pair. One
+//  bit cannot tell "open" from "stopped halfway" from "sensor dead".
+enum DoorState : uint8_t {
+  DOOR_UNKNOWN = 0,   // a limit tag did not answer
+  DOOR_SHUT    = 1,   // closed limit made, open limit clear
+  DOOR_OPEN    = 2,   // open limit made, closed limit clear
+  DOOR_MID     = 3,   // neither: in travel, or a limit switch out of adjustment
+  DOOR_CONFLICT= 4    // both made: a sensor is lying
 };
 
 struct Cmd {
@@ -147,8 +162,8 @@ static volatile bool g_otaStarted = false;
 
 static_assert(std::is_trivially_copyable<PlcSnapshot>::value,
               "PlcSnapshot must be plain data: no String, no pointers");
-static_assert(sizeof(PlcSnapshot) < 1024,
-              "PlcSnapshot copy is meant to be a sub-kilobyte memcpy");
+static_assert(sizeof(PlcSnapshot) < 1088,
+              "PlcSnapshot copy is meant to stay near a kilobyte memcpy");
 static_assert(std::is_trivially_copyable<CtrlState>::value, "CtrlState must be plain data");
 static_assert(std::is_trivially_copyable<Cmd>::value, "Cmd must be plain data");
 

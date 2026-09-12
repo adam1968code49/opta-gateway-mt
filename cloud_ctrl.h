@@ -225,6 +225,22 @@ void onManCondPumpChange() {
   const PlcSnapshot& s = cloudSideSnapshot();
   ctrlManual(manCondPump, CMD_MAN_PUMP, "manCondPump", s.valveOk[VSLOT_P_COND] && s.valve[VSLOT_P_COND] > 0.5f);
 }
+//  batch 15: the LACO chamber doors. Same gate set as the other manual
+//  outputs; the PLC thread re-checks the sequencer on its own copy and
+//  applies the LACO-specific gates (link, air, chamber vented) that only
+//  it can see. The switch shows both sides' door limits, so it flips back
+//  by itself if the doors do not actually move.
+void onManTopDoorsChange() {
+  const PlcSnapshot& s = cloudSideSnapshot();
+  ctrlManual(manTopDoors, CMD_MAN_TOPDOORS, "manTopDoors",
+             s.doorState[0] == DOOR_OPEN && s.doorState[1] == DOOR_OPEN);
+}
+void onManBotDoorsChange() {
+  const PlcSnapshot& s = cloudSideSnapshot();
+  ctrlManual(manBotDoors, CMD_MAN_BOTDOORS, "manBotDoors",
+             s.doorState[2] == DOOR_OPEN && s.doorState[3] == DOOR_OPEN);
+}
+
 void onManS5OpenChange() {
   const PlcSnapshot& s = cloudSideSnapshot();
   ctrlManual(manS5Open, CMD_MAN_S5, "manS5Open", s.valveOk[VSLOT_V_S5] && s.valve[VSLOT_V_S5] > 0.5f);
