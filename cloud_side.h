@@ -23,7 +23,7 @@ static PlcSnapshot s_local = {};
 //  looks unchanged and the warning sticks on the dashboard forever
 //  (2026-09-11 10:32 boot: "plc thread stalled 64s" stayed up for hours).
 static char s_prevLastError[PlcSnapshot::LASTERR_CAP] = "";
-bool ctrlManualHoldActive();   // cloud_ctrl.h (batch 13): true for 6 s after a manual S4/pump command was posted
+bool ctrlManualHoldActive(uint32_t snapStampMs);   // cloud_ctrl.h (batch 13): true until a snapshot two PLC ticks after the last manual command has been seen (10 s cap)
 inline void cloudSideNoteLastError(const char* text) { snprintf(s_prevLastError, sizeof s_prevLastError, "%s", text); }
 
 //  Assign sensor slot i only if it was read this tick.
@@ -69,10 +69,11 @@ static void cloudSideAssign() {
   TAKE_VF(20, posV10); TAKE_VF(21, posV11);
 
   // ---- batch 13: the two manual switches mirror the PLC's real outputs ------
-  //  Skipped for MAN_MIRROR_HOLD_MS after a command so the switch does not
-  //  flick back before the PLC has had a tick to act. If the PLC overwrites
-  //  the manual write, the switch simply flips back: truth, not intent.
-  if (!ctrlManualHoldActive()) {
+  //  Skipped until a snapshot from two PLC ticks after a command has arrived,
+  //  so the switch does not flick back before the PLC has acted. If the PLC
+  //  overwrites the manual write, the switch simply flips back: truth, not
+  //  intent -- and the PLC thread refuses an OFF on an output it does not own.
+  if (!ctrlManualHoldActive(s_local.stampMs)) {
     bool s4 = s_local.valveOk[VSLOT_POS_S4] ? (s_local.valve[VSLOT_POS_S4] >= 50.0f) : (bool)manS4Open;
     bool pu = s_local.valveOk[VSLOT_P_COND]  ? (s_local.valve[VSLOT_P_COND]  >  0.5f) : (bool)manCondPump;
     if ((bool)manS4Open   != s4) manS4Open   = s4;

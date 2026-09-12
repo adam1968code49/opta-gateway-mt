@@ -83,33 +83,41 @@ static bool ctrlQuiet() {
 
 //  Gates 1-3. Sets lastError on the refusals the operator should see.
 static bool ctrlGate(const char* what) {
+  //  Every refusal text is also noted to cloud_side's de-dup (batch 13 review
+  //  I5): otherwise, with the PLC steady at "ok", the refusal stays on the
+  //  dashboard until something else changes lastError.
   if (ctrlQuiet()) {
     LOG("[CTRL] ignored (first sync): "); LOGLN(what);
     lastError = "control: syncing, wait 15 s";
+    cloudSideNoteLastError("control: syncing, wait 15 s");
     return false;
   }
   if (!s_ctrlLocal.controlEnabled) {
     LOG("[CTRL] blocked (controlEnabled=false): "); LOGLN(what);
     lastError = "control disabled";
+    cloudSideNoteLastError("control disabled");
     return false;
   }
   if (!cloudSidePlcConnected()) {
     LOG("[CTRL] blocked (plc offline): "); LOGLN(what);
     lastError = "control: plc offline";
+    cloudSideNoteLastError("control: plc offline");
     return false;
   }
   return true;
 }
 
-static void ctrlPost(uint16_t tag, bool isBool, float value, const char* what) {
+static bool ctrlPost(uint16_t tag, bool isBool, float value, const char* what) {
   Cmd c;
   c.tag = tag; c.isBool = isBool; c.value = value;
   if (!sharedCmdPost(c)) {
     LOG("[CTRL] queue full, dropped: "); LOGLN(what);
     lastError = "control: queue full";
-    return;
+    cloudSideNoteLastError("control: queue full");
+    return false;
   }
   LOG("[CTRL] queued "); LOG(what); LOG(" = "); LOGLN(value);
+  return true;
 }
 
 //  A BOOL control that cannot be honoured is written back false so the
@@ -178,23 +186,35 @@ void onDesorpTimeMsChange() {
 //  The switch is written back to the PLC's real state on refusal; after a
 //  posted command the mirror in cloud_side.h is held 6 s so it does not flick
 //  back before the PLC has acted.
-#define MAN_MIRROR_HOLD_MS 6000UL
-static unsigned long s_manHoldUntil = 0;
-bool ctrlManualHoldActive() { return (long)(millis() - s_manHoldUntil) < 0; }
+//  Hold rule (review minor): the mirror is skipped until a snapshot stamped
+//  two PLC ticks after the post has been consumed -- by then the PLC thread
+//  has executed the write and swept the read-back -- with a 10 s hard cap so
+//  a stalled PLC thread cannot pin the switch forever.
+#define MAN_MIRROR_HOLD_TICKS_MS (2UL * SAMPLE_INTERVAL_MS)
+#define MAN_MIRROR_HOLD_CAP_MS   10000UL
+static bool          s_manHoldSet  = false;
+static unsigned long s_manPostMs   = 0;
+bool ctrlManualHoldActive(uint32_t snapStampMs) {
+  if (!s_manHoldSet) return false;
+  if ((long)(millis() - (s_manPostMs + MAN_MIRROR_HOLD_CAP_MS)) >= 0)          { s_manHoldSet = false; return false; }
+  if ((long)(snapStampMs - (s_manPostMs + MAN_MIRROR_HOLD_TICKS_MS)) >= 0)     { s_manHoldSet = false; return false; }
+  return true;
+}
 
 static void ctrlManual(CloudBool& prop, uint16_t tag, const char* what, bool actual) {
   SHARED_ASSERT_ON_CLOUD();
   const bool on = (bool)prop;
   LOG("[CTRL] "); LOG(what); LOG(" -> "); LOGLN(on ? "ON" : "OFF");
   if (!ctrlGate(what)) { if (on != actual) prop = actual; return; }
-  if (on && cloudSideSnapshot().actionWord != 0) {
+  if (on && cloudSideSnapshot().actionWord != 0) {      // first look; the PLC thread re-checks on its own copy
     LOGLN("[CTRL] refused: cycle running");
     lastError = "manual: cycle running";
+    cloudSideNoteLastError("manual: cycle running");
     if (on != actual) prop = actual;
     return;
   }
-  ctrlPost(tag, true, on ? 1.0f : 0.0f, what);
-  s_manHoldUntil = millis() + MAN_MIRROR_HOLD_MS;
+  if (ctrlPost(tag, true, on ? 1.0f : 0.0f, what)) { s_manHoldSet = true; s_manPostMs = millis(); }
+  else if (on != actual) prop = actual;                  // dropped: do not show ON for something never sent
 }
 
 void onManS4OpenChange() {

@@ -366,7 +366,14 @@ static void clearVerifyTick(PlcSnapshot& w) {
 #define MAN_PUMP_STOP_LEVEL 18.0f
 #define MAN_PUMP_MAX_MS     180000UL
 #define MAN_VERIFY_MS       4000UL
-static bool          s_manPumpActive = false;
+//  OWNERSHIP (review C1). The two dashboard switches mirror the PLC's real
+//  outputs, so during an automatic discharge they read ON with nobody having
+//  touched them. Only an output the gateway itself switched on may be
+//  switched off from the dashboard; anything else is the sequencer's and
+//  stays alone. Ownership ends when the operator turns it off, when the PLC
+//  is seen to have taken it back, or when the read-back verdict says so.
+static bool          s_manOwnS4      = false;
+static bool          s_manPumpActive = false;   // == the gateway owns a running pump (timer armed)
 static unsigned long s_manPumpOnMs   = 0;
 static bool          s_manChk[2]     = { false, false };   // 0 = S4, 1 = pump
 static bool          s_manExpect[2]  = { false, false };
@@ -376,40 +383,55 @@ static void manArm(uint8_t i, bool expect) {
   s_manChk[i] = true; s_manExpect[i] = expect; s_manDueMs[i] = millis() + MAN_VERIFY_MS;
 }
 
-static bool manPumpWrite(PlcSnapshot& w, bool on, const char* okText) {
+//  arm=false for the auto-stop: a sequencer pump start inside the next 4 s
+//  must not be reported as "re-asserted" (review I6).
+static bool manPumpWrite(PlcSnapshot& w, bool on, const char* okText, bool arm) {
   bool ok = eip.writeBool(TAG_P_COND, on);
   if (ok) clearSay(w, "%s", okText);
   else    clearSay(w, "write %s failed", TAG_P_COND);
-  if (ok) { manArm(1, on); s_manPumpActive = on; if (on) s_manPumpOnMs = millis(); }
+  if (ok) { if (arm) manArm(1, on); s_manPumpActive = on; if (on) s_manPumpOnMs = millis(); }
+  wdBeatPlc();
   return ok;
 }
 
+//  ON gates re-checked here on the PLC thread's own state word (review I4):
+//  the cloud thread's copy can be ~8 s stale.
 static bool manS4(PlcSnapshot& w, bool on) {
+  if (on && w.actionWord != 0) { clearSay(w, "%s", "manual: cycle running"); return false; }
+  if (!on && !s_manOwnS4)      { clearSay(w, "%s", "S4: not a manual output"); return false; }
   bool pumpOn = s_manPumpActive || (w.valveOk[VSLOT_P_COND] && w.valve[VSLOT_P_COND] > 0.5f);
   bool stoppedPump = false;
-  if (!on && pumpOn) { stoppedPump = manPumpWrite(w, false, "pump stopped"); wdBeatPlc(); }
+  if (!on && pumpOn) {
+    stoppedPump = manPumpWrite(w, false, "pump stopped", true);
+    if (!stoppedPump) return false;           // review I2: never seal the collector on a running pump
+  }
   bool ok = eip.writeReal(TAG_POS_S4, on ? 100.0f : 0.0f);
   if (!ok)              clearSay(w, "write %s failed", TAG_POS_S4);
   else if (stoppedPump) clearSay(w, "%s", "S4 closed, pump stopped");
   else                  clearSay(w, "%s", on ? "S4 opened" : "S4 closed");
-  if (ok) manArm(0, on);
+  if (ok) { manArm(0, on); s_manOwnS4 = on; }
   return ok;
 }
 
 static bool manPump(PlcSnapshot& w, bool on) {
+  if (on && w.actionWord != 0)  { clearSay(w, "%s", "manual: cycle running"); return false; }
+  if (!on && !s_manPumpActive)  { clearSay(w, "%s", "pump: not a manual output"); return false; }
   if (on && !(w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] >= 50.0f)) {
     clearSay(w, "%s", "pump: S4 not open");
     return false;
   }
-  return manPumpWrite(w, on, on ? "pump started" : "pump stopped");
+  return manPumpWrite(w, on, on ? "pump started" : "pump stopped", true);
 }
 
-//  PLC gone: the manual pump is no longer ours to time, and a read-back after
-//  a reconnect would judge a bit that changed for other reasons.
-static void manDisarm() { s_manPumpActive = false; s_manChk[0] = s_manChk[1] = false; }
+//  PLC gone: drop the read-back checks (a verdict after a reconnect would
+//  judge a bit that changed for other reasons) but KEEP the pump ownership
+//  and its start time (review I3): if the pump is still running when the
+//  link returns, the level-18 / 180 s stop must still apply.
+static void manDisarm() { s_manChk[0] = s_manChk[1] = false; }
 
 //  After pollValvesInto(), PLC connected: auto-stop first, then the verdicts
-//  (only for sweeps that started after the due time, as in clearVerifyTick).
+//  (only for sweeps that started after the due time, as in clearVerifyTick),
+//  then ownership catch-up from the read-back.
 static void manualTick(PlcSnapshot& w) {
   SHARED_ASSERT_ON_PLC();
   unsigned long now = millis();
@@ -418,20 +440,29 @@ static void manualTick(PlcSnapshot& w) {
     bool late = now - s_manPumpOnMs >= MAN_PUMP_MAX_MS;
     if (low || late) {
       wdWherePlc(WD_AT_CIPWRITE);
-      manPumpWrite(w, false, low ? "pump stopped: level 18" : "pump stopped: 180 s");
+      manPumpWrite(w, false, low ? "pump stopped: level 18" : "pump stopped: 180 s", false);
+      wdWherePlc(WD_AT_VALVES);
     }
   }
   for (uint8_t i = 0; i < 2; i++) {
     if (!s_manChk[i] || (long)(s_valveSweepStartMs - s_manDueMs[i]) < 0) continue;
     s_manChk[i] = false;
     const uint8_t slot = (i == 0) ? VSLOT_POS_S4 : VSLOT_P_COND;
-    if (!w.valveOk[slot]) continue;                       // unread: no verdict
+    const char* who = (i == 0) ? "S4" : TAG_P_COND;
+    if ((long)(now - s_manDueMs[i]) > (long)CLEAR_VERIFY_STALE_MS || !w.valveOk[slot]) {
+      clearSay(w, "%s unverified", who);           // review I6: too late or unread -> no judgement
+      continue;
+    }
     bool actual = (i == 0) ? (w.valve[slot] >= 50.0f) : (w.valve[slot] > 0.5f);
     if (actual != s_manExpect[i]) {
-      clearSay(w, "%s re-asserted by PLC", (i == 0) ? "S4" : TAG_P_COND);
-      if (i == 1) s_manPumpActive = false;
+      clearSay(w, "%s re-asserted by PLC", who);
+      if (i == 0) s_manOwnS4 = false; else s_manPumpActive = false;
     }
   }
+  //  Outside a verdict window, an output we own that reads OFF was taken
+  //  back by the PLC (its own stop, a download, a reset): ownership ends.
+  if (s_manOwnS4 && !s_manChk[0] && w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] < 50.0f) s_manOwnS4 = false;
+  if (s_manPumpActive && !s_manChk[1] && w.valveOk[VSLOT_P_COND] && w.valve[VSLOT_P_COND] < 0.5f) s_manPumpActive = false;
 }
 
 // ---------------------------------------------------------------------
