@@ -33,6 +33,15 @@
 - OTA `3b0dafae…` 成功；`fwVersion 2bb5f73`，n=80→81；开机时两开关镜像为 false（`posS4=0`、`pumpCond=0`），序列空闲，`tankLevel` 78.5。
 - 真机排水由 Adam 操作：Control enable 开 → `S4 vent (manual)` 开 → 看 `posS4` 变 100、`lastError`=`S4 opened`；→ `Lefoo pump (manual)` 开 → `pumpCond=1`、`flowRate>0`、`tankLevel` 下降 → 到 18 自动停 `pump stopped: level 18`。任一环节报 `re-asserted by PLC` 并弹回 = PLC 每周期重写该输出，需同事在 PLC 加手动位。
 
+## 真机结果（2026-09-11 21:54 PT，Adam 操作）
+
+`lastError` 逐条：`control enabled` → `S4 opened`（`posS4` 变 100 并一直保持）→ `pump started` → 6 s 后 `Cond_Pump re-asserted by PLC`，`pumpCond` 从未出现 1。结论：**`Air_S4_Output`（模拟量）网关写得住；`Cond_Pump`（BOOL 输出）被 PLC 程序每个扫描周期重写**，外部写活不过一个周期。要远程开泵必须由同事在 PLC 里加手动位（在驱动 `Cond_Pump` 的梯级并联一个 BOOL），网关改写那个位。
+
+## 批 13.1（`8c6b050` → 复审修复 `ef7e10d`）：S5 开关
+
+Adam 要求加 S5（`Air_S5`，BOOL，集水罐 → 泵之间的阀，P&ID：Tank → S4 通大气，S5 → 泵 → 净水）。`manS5Open`，与 S4 同一套所有权/读回/镜像；泵的互锁改为 **S4 与 S5 都读回开**（`pump: S4/S5 not open`）；关 S5 先停泵。三个手动输出用 `MAN_SLOT[]/MAN_WHO[]/manReadOn()` 表驱动。
+复审（Opus）Critical：PLC 若把 S5 或 S4 关回去，手动泵会对着关闭的吸入阀空转满 180 s（液位不降，液位停泵永不触发）。→ `manualTick` 末尾：泵在跑而 S4 或 S5 读回关（核对窗口之外）→ 立刻停泵，`pump stopped: S5 closed`。看板 "IP2 AWG v10"（`da197c23-b482-4758-8fe9-0e1d17c26025`，从 v9 建，含 Adam 手加的 `Purge_button`，187 个部件）。
+
 ## 操作员须知
 
 1. 两个开关**显示的是 PLC 实际输出**：自动排水时它们自己会亮，那时拨 OFF 会被拒绝（"not a manual output"），只能关自己开的。

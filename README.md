@@ -123,6 +123,12 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   PLC's real outputs and only a gateway-switched output may be switched off (review C1). Boot counter n=80 -> 81.
   At boot: S4 0, pump off, sequencer idle, tankLevel 78.5 after three cycles aborted before their discharge step.
   Dashboard "IP2 AWG v9" (9d4dc360). The drain itself is Adam's to run. See docs/batch13-final-review.md.
+  21:54 PT result: S4 opened and HELD (posS4 100); the pump write was overwritten by the PLC within one scan
+  ("Cond_Pump re-asserted by PLC") -- Cond_Pump is program-driven every scan, a PLC-side manual bit is needed.
+- 2026-09-11 22:25 PT batch 13.1 on IP2 via OTA, fw ef7e10d: manS5Open (Air_S5, tank -> pump valve); pump interlock
+  needs S4 and S5 open; manual pump stops at once if S4 or S5 is read closed by anyone (review Critical: no
+  dead-heading against a closed suction line). Dashboard "IP2 AWG v10" (da197c23), includes Adam's hand-added
+  Purge_button. See docs/batch13-final-review.md.
 
 ## CI
 
