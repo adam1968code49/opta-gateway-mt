@@ -357,6 +357,84 @@ static void clearVerifyTick(PlcSnapshot& w) {
 }
 
 // ---------------------------------------------------------------------
+//  batch 13: manual drain. S4 (Air_S4_Output) is a 0..100 REAL, the Lefoo
+//  pump (Cond_Pump) a BOOL. The pump only starts with S4 read back open,
+//  and stops itself at collector level 18 or after 180 s, whichever first.
+//  Both writes are read back 4 s later like the fault clears; the text goes
+//  through clearSay() so it stays visible in the "ok" gaps for 60 s.
+// ---------------------------------------------------------------------
+#define MAN_PUMP_STOP_LEVEL 18.0f
+#define MAN_PUMP_MAX_MS     180000UL
+#define MAN_VERIFY_MS       4000UL
+static bool          s_manPumpActive = false;
+static unsigned long s_manPumpOnMs   = 0;
+static bool          s_manChk[2]     = { false, false };   // 0 = S4, 1 = pump
+static bool          s_manExpect[2]  = { false, false };
+static unsigned long s_manDueMs[2]   = { 0, 0 };
+
+static void manArm(uint8_t i, bool expect) {
+  s_manChk[i] = true; s_manExpect[i] = expect; s_manDueMs[i] = millis() + MAN_VERIFY_MS;
+}
+
+static bool manPumpWrite(PlcSnapshot& w, bool on, const char* okText) {
+  bool ok = eip.writeBool(TAG_P_COND, on);
+  if (ok) clearSay(w, "%s", okText);
+  else    clearSay(w, "write %s failed", TAG_P_COND);
+  if (ok) { manArm(1, on); s_manPumpActive = on; if (on) s_manPumpOnMs = millis(); }
+  return ok;
+}
+
+static bool manS4(PlcSnapshot& w, bool on) {
+  bool pumpOn = s_manPumpActive || (w.valveOk[VSLOT_P_COND] && w.valve[VSLOT_P_COND] > 0.5f);
+  bool stoppedPump = false;
+  if (!on && pumpOn) { stoppedPump = manPumpWrite(w, false, "pump stopped"); wdBeatPlc(); }
+  bool ok = eip.writeReal(TAG_POS_S4, on ? 100.0f : 0.0f);
+  if (!ok)              clearSay(w, "write %s failed", TAG_POS_S4);
+  else if (stoppedPump) clearSay(w, "%s", "S4 closed, pump stopped");
+  else                  clearSay(w, "%s", on ? "S4 opened" : "S4 closed");
+  if (ok) manArm(0, on);
+  return ok;
+}
+
+static bool manPump(PlcSnapshot& w, bool on) {
+  if (on && !(w.valveOk[VSLOT_POS_S4] && w.valve[VSLOT_POS_S4] >= 50.0f)) {
+    clearSay(w, "%s", "pump: S4 not open");
+    return false;
+  }
+  return manPumpWrite(w, on, on ? "pump started" : "pump stopped");
+}
+
+//  PLC gone: the manual pump is no longer ours to time, and a read-back after
+//  a reconnect would judge a bit that changed for other reasons.
+static void manDisarm() { s_manPumpActive = false; s_manChk[0] = s_manChk[1] = false; }
+
+//  After pollValvesInto(), PLC connected: auto-stop first, then the verdicts
+//  (only for sweeps that started after the due time, as in clearVerifyTick).
+static void manualTick(PlcSnapshot& w) {
+  SHARED_ASSERT_ON_PLC();
+  unsigned long now = millis();
+  if (s_manPumpActive) {
+    bool low  = w.ok[SSLOT_LEVEL] && w.sensor[SSLOT_LEVEL] < MAN_PUMP_STOP_LEVEL;
+    bool late = now - s_manPumpOnMs >= MAN_PUMP_MAX_MS;
+    if (low || late) {
+      wdWherePlc(WD_AT_CIPWRITE);
+      manPumpWrite(w, false, low ? "pump stopped: level 18" : "pump stopped: 180 s");
+    }
+  }
+  for (uint8_t i = 0; i < 2; i++) {
+    if (!s_manChk[i] || (long)(s_valveSweepStartMs - s_manDueMs[i]) < 0) continue;
+    s_manChk[i] = false;
+    const uint8_t slot = (i == 0) ? VSLOT_POS_S4 : VSLOT_P_COND;
+    if (!w.valveOk[slot]) continue;                       // unread: no verdict
+    bool actual = (i == 0) ? (w.valve[slot] >= 50.0f) : (w.valve[slot] > 0.5f);
+    if (actual != s_manExpect[i]) {
+      clearSay(w, "%s re-asserted by PLC", (i == 0) ? "S4" : TAG_P_COND);
+      if (i == 1) s_manPumpActive = false;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------
 //  Commands from main. The gate is checked again here: a controlEnabled
 //  that went false between the post and this tick drops the queue. Every
 //  write reports into w.lastError with the old firmware's wording so the
@@ -432,6 +510,8 @@ static void applyCommand(PlcSnapshot& w, const Cmd& c) {
     case CMD_CLEAR_PRESS_ERROR: ok = clearFault(w, 0); break;   // batch 12
     case CMD_CLEAR_TEMP_ERROR:  ok = clearFault(w, 1); break;
     case CMD_CLEAR_GEN_ERROR:   ok = clearFault(w, 2); break;
+    case CMD_MAN_S4:            ok = manS4(w, on);     break;   // batch 13
+    case CMD_MAN_PUMP:          ok = manPump(w, on);   break;
     default:
       snprintf(w.lastError, PlcSnapshot::LASTERR_CAP, "cmd %u not in batch 1", (unsigned)c.tag);
       break;
@@ -500,6 +580,7 @@ static void plcThreadBody() {
       for (size_t k = 0; k < N_SENSORS; k++) w.ok[k] = false;
       for (size_t k = 0; k < N_VALVE;   k++) w.valveOk[k] = false;
       clearDisarm();                          // batch 12: no verdict on a bit read after a reconnect
+      manDisarm();                            // batch 13: same, and the manual pump timer is void
       if (tick0 - lastReconnect >= reconnectWait) {
         lastReconnect = tick0;
         wdWherePlc(WD_AT_PLCPROBE);
@@ -533,6 +614,7 @@ static void plcThreadBody() {
       if (eip.connected()) {
         pollValvesInto(w);
         clearVerifyTick(w);                   // batch 12: read-back of any clear written >= 4 s ago
+        manualTick(w);                        // batch 13: manual pump auto-stop + S4/pump read-back
         if (tickN % STATE_EVERY_TICKS == 0) pollPlcStateInto(w);
         if (tickN % STATE_EVERY_TICKS == 1) pollHeatPumpInto(w);
 #if FLOW_TO_PLC_ENABLE

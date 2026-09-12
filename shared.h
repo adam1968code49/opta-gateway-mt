@@ -126,6 +126,7 @@ enum CmdTag : uint16_t {
   CMD_HP_HTG_DELTA1, CMD_HP_HTG_DELTA2, CMD_HP_CLG_SP1, CMD_HP_CLG_SP2,
   CMD_HP_CLG_DELTA1, CMD_HP_CLG_DELTA2, CMD_HP_HTG_HIGH_LIMIT, CMD_HP_MANUAL_OVERRIDE,
   CMD_CLEAR_PRESS_ERROR, CMD_CLEAR_TEMP_ERROR, CMD_CLEAR_GEN_ERROR,   // batch 12: write the fault BOOL to 0
+  CMD_MAN_S4, CMD_MAN_PUMP,                                          // batch 13: manual drain (S4 vent, Lefoo pump)
 };
 
 struct Cmd {

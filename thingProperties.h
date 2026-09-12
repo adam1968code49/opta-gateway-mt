@@ -175,6 +175,11 @@ CloudBool  purgeButton;        // -> Purge_Button
 CloudBool  clearPressError;    // -> Press_Error := 0, then read back
 CloudBool  clearTempError;     // -> Temp_Error  := 0, then read back
 CloudBool  clearGenError;      // -> Gen_Error   := 0, then read back
+// ---- batch 13: manual drain -- S4 vent and the Lefoo condensate pump ------
+//  Mirrors of the PLC's actual outputs (cloud_side.h), so they show truth and
+//  flip back if the PLC overwrites what the operator asked for.
+CloudBool  manS4Open;          // -> Air_S4_Output 100/0
+CloudBool  manCondPump;        // -> Cond_Pump, interlocked on S4 open, auto-stop at level 18 / 180 s
 CloudInt   adsorpTimeMs;       // adsorption time in MINUTES (dashboard); x60000 -> Timer_3.PRE ms. clamp 5-60
 CloudInt   desorpTimeMs;       // desorption time in MINUTES (dashboard); x60000 -> Timer_6[3].PRE ms. clamp 5-60
 
@@ -214,6 +219,8 @@ void onHpModeCoolChange();
 void onClearPressErrorChange();
 void onClearTempErrorChange();
 void onClearGenErrorChange();
+void onManS4OpenChange();
+void onManCondPumpChange();
 
 void initProperties() {
   // --- sensors ---
@@ -369,6 +376,8 @@ void initProperties() {
   ArduinoCloud.addProperty(clearPressError, READWRITE, ON_CHANGE, onClearPressErrorChange);   // batch 12
   ArduinoCloud.addProperty(clearTempError,  READWRITE, ON_CHANGE, onClearTempErrorChange);
   ArduinoCloud.addProperty(clearGenError,   READWRITE, ON_CHANGE, onClearGenErrorChange);
+  ArduinoCloud.addProperty(manS4Open,   READWRITE, ON_CHANGE, onManS4OpenChange);      // batch 13
+  ArduinoCloud.addProperty(manCondPump, READWRITE, ON_CHANGE, onManCondPumpChange);
   ArduinoCloud.addProperty(adsorpTimeMs,   READWRITE, ON_CHANGE, onAdsorpTimeMsChange);
   ArduinoCloud.addProperty(desorpTimeMs,   READWRITE, ON_CHANGE, onDesorpTimeMsChange);
 

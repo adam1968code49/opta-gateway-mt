@@ -172,6 +172,40 @@ void onDesorpTimeMsChange() {
   ctrlPost(CMD_DESORP_TIME_MS, false, (float)mins, "desorpTime");
 }
 
+//  batch 13: manual S4 / Lefoo pump. ON passes ctrlGate AND needs the
+//  sequencer idle (actionWord == 0) -- a manual output under a running cycle
+//  would fight the PLC. OFF passes ctrlGate only: stopping is always allowed.
+//  The switch is written back to the PLC's real state on refusal; after a
+//  posted command the mirror in cloud_side.h is held 6 s so it does not flick
+//  back before the PLC has acted.
+#define MAN_MIRROR_HOLD_MS 6000UL
+static unsigned long s_manHoldUntil = 0;
+bool ctrlManualHoldActive() { return (long)(millis() - s_manHoldUntil) < 0; }
+
+static void ctrlManual(CloudBool& prop, uint16_t tag, const char* what, bool actual) {
+  SHARED_ASSERT_ON_CLOUD();
+  const bool on = (bool)prop;
+  LOG("[CTRL] "); LOG(what); LOG(" -> "); LOGLN(on ? "ON" : "OFF");
+  if (!ctrlGate(what)) { if (on != actual) prop = actual; return; }
+  if (on && cloudSideSnapshot().actionWord != 0) {
+    LOGLN("[CTRL] refused: cycle running");
+    lastError = "manual: cycle running";
+    if (on != actual) prop = actual;
+    return;
+  }
+  ctrlPost(tag, true, on ? 1.0f : 0.0f, what);
+  s_manHoldUntil = millis() + MAN_MIRROR_HOLD_MS;
+}
+
+void onManS4OpenChange() {
+  const PlcSnapshot& s = cloudSideSnapshot();
+  ctrlManual(manS4Open, CMD_MAN_S4, "manS4Open", s.valveOk[VSLOT_POS_S4] && s.valve[VSLOT_POS_S4] >= 50.0f);
+}
+void onManCondPumpChange() {
+  const PlcSnapshot& s = cloudSideSnapshot();
+  ctrlManual(manCondPump, CMD_MAN_PUMP, "manCondPump", s.valveOk[VSLOT_P_COND] && s.valve[VSLOT_P_COND] > 0.5f);
+}
+
 //  batch 12: momentary clear-fault buttons. Same three gates as the machine
 //  controls (a fault bit reset may let stopped equipment restart), momentary
 //  like flowResetTotal: only a true acts, and the switch is always written

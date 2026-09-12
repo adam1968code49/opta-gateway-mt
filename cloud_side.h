@@ -23,6 +23,7 @@ static PlcSnapshot s_local = {};
 //  looks unchanged and the warning sticks on the dashboard forever
 //  (2026-09-11 10:32 boot: "plc thread stalled 64s" stayed up for hours).
 static char s_prevLastError[PlcSnapshot::LASTERR_CAP] = "";
+bool ctrlManualHoldActive();   // cloud_ctrl.h (batch 13): true for 6 s after a manual S4/pump command was posted
 inline void cloudSideNoteLastError(const char* text) { snprintf(s_prevLastError, sizeof s_prevLastError, "%s", text); }
 
 //  Assign sensor slot i only if it was read this tick.
@@ -60,12 +61,23 @@ static void cloudSideAssign() {
   TAKE_VB( 3, valveS7);    TAKE_VB( 4, valveS10);
   TAKE_VB( 5, valveV1A);   TAKE_VB( 6, valveV1B);
   TAKE_VB( 7, valveV2A1);  TAKE_VB( 8, valveV2A2); TAKE_VB( 9, valveV2B);
-  TAKE_VB(10, pumpScroll); TAKE_VB(11, pumpCond);
+  TAKE_VB(10, pumpScroll); TAKE_VB(VSLOT_P_COND, pumpCond);
   TAKE_VB(12, pumpHotWater); TAKE_VB(13, pumpColdWater);
   TAKE_VB(14, boosterVfdRun);
-  TAKE_VF(15, posS2);  TAKE_VF(16, posS3);  TAKE_VF(17, posS4);
+  TAKE_VF(15, posS2);  TAKE_VF(16, posS3);  TAKE_VF(VSLOT_POS_S4, posS4);
   TAKE_VF(18, posS8);  TAKE_VF(19, posS9);
   TAKE_VF(20, posV10); TAKE_VF(21, posV11);
+
+  // ---- batch 13: the two manual switches mirror the PLC's real outputs ------
+  //  Skipped for MAN_MIRROR_HOLD_MS after a command so the switch does not
+  //  flick back before the PLC has had a tick to act. If the PLC overwrites
+  //  the manual write, the switch simply flips back: truth, not intent.
+  if (!ctrlManualHoldActive()) {
+    bool s4 = s_local.valveOk[VSLOT_POS_S4] ? (s_local.valve[VSLOT_POS_S4] >= 50.0f) : (bool)manS4Open;
+    bool pu = s_local.valveOk[VSLOT_P_COND]  ? (s_local.valve[VSLOT_P_COND]  >  0.5f) : (bool)manCondPump;
+    if ((bool)manS4Open   != s4) manS4Open   = s4;
+    if ((bool)manCondPump != pu) manCondPump = pu;
+  }
   TAKE_VF(22, hmiWaterTotal); TAKE_VF(23, cumulativeWaterVolume);
   TAKE_VB(VSLOT_PRESS_ERROR, pressError); TAKE_VB(VSLOT_TEMP_ERROR, tempError); TAKE_VB(VSLOT_GEN_ERROR, genError);
   TAKE_VB(27, stStage1);     TAKE_VB(28, stStage2);     TAKE_VB(29, stAuxHeat);
