@@ -741,6 +741,16 @@
 #define TAG_IND_TOPB      "Indicator_TopB_Closed"
 #define TAG_IND_BOTA      "Indicator_BotA_Closed"
 #define TAG_IND_BOTB      "Indicator_BotB_Closed"
+//  batch 14: the matching OPEN limit switches. The PLC has carried both
+//  halves of every door sensor pair since at least the 2026-09-02 tag
+//  export; the gateway read only the "closed" half, which cannot tell a
+//  door that is open from one stopped halfway or from a dead sensor. With
+//  the pair, each side resolves to open / shut / mid / sensor conflict --
+//  see doorStat.
+#define TAG_IND_TOPA_OPEN "Indicator_TopA_Open"
+#define TAG_IND_TOPB_OPEN "Indicator_TopB_Open"
+#define TAG_IND_BOTA_OPEN "Indicator_BotA_Open"
+#define TAG_IND_BOTB_OPEN "Indicator_BotB_Open"
 //
 //  Number of tags in the valve/status sweep that failed to read, published
 //  to the cloud. Zero means every tag in that sweep answered.

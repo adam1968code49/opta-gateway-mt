@@ -106,6 +106,13 @@ static void cloudSideAssign() {
       snprintf(prevStateText, sizeof prevStateText, "%s", s_local.stateText);
       plcStateText = String(s_local.stateText);
     }
+    //  batch 14: the four LACO door sides, resolved from their sensor pairs.
+    //  Empty until the first state sweep has run: publish nothing then.
+    static char prevDoorStat[PlcSnapshot::DOORSTAT_CAP] = "";
+    if (s_local.doorStat[0] && strcmp(prevDoorStat, s_local.doorStat) != 0) {
+      snprintf(prevDoorStat, sizeof prevDoorStat, "%s", s_local.doorStat);
+      doorStat = String(s_local.doorStat);
+    }
     adsorpElapsedS    = (int)s_local.adsorpElapsedS;
     desorpElapsedT6S  = (int)s_local.desorpElapsedT6S;
     desorpElapsedT11S = (int)s_local.desorpElapsedT11S;

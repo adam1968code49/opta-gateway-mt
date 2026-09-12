@@ -95,6 +95,10 @@ CloudString plcFailTag;             // RO: first failing tag of the sensor or st
 CloudInt    plcActionWord;    // bit N = Action_(N+1)
 CloudInt    plcStateWord;     // buttons / states / fans / door indicators
 CloudString plcStateText;
+//  batch 14: the four LACO chamber door sides, each resolved from its OPEN +
+//  CLOSED limit-switch pair: "TA:shut TB:shut BA:open BB:mid" (?? = both
+//  sensors on, ? = tag unread). Read-only; the PLC owns the doors.
+CloudString doorStat;
 CloudInt    adsorpElapsedS;    // Timer_3.ACC
 CloudInt    desorpElapsedT6S;  // Timer_6[3].ACC   (top chamber)
 CloudInt    desorpElapsedT11S; // Timer_11[3].ACC  (bottom chamber)
@@ -306,6 +310,7 @@ void initProperties() {
   ArduinoCloud.addProperty(plcActionWord,     READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcStateWord,      READ, ON_CHANGE);
   ArduinoCloud.addProperty(plcStateText,      READ, ON_CHANGE);
+  ArduinoCloud.addProperty(doorStat,          READ, ON_CHANGE);   // batch 14
 
   // --- water accounting ---
   ArduinoCloud.addProperty(flowRate,           READ, 5 * SECONDS);

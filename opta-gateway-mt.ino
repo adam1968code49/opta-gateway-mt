@@ -39,7 +39,7 @@
 #include "cloud_side.h"
 #include "cloud_ctrl.h"
 #include "cloud_thread.h"
-static_assert(N_VALVE == 36 && N_STATE == 27 && N_ACTION == 15, "batch 1 sweep tables");
+static_assert(N_VALVE == 36 && N_STATE == 31 && N_ACTION == 15, "sweep tables: batch 14 appended four door-open indicators");
 static_assert(PlcSnapshot::STATETEXT_CAP == 128 && PlcSnapshot::FAILTAG_CAP == 40, "batch 1 snapshot strings");
 static_assert(sizeof(PlcSnapshot) < 960, "snapshot grew past 960 B");
 static_assert(DESORP_TIME_MIN_MIN == 5 && ADSORP_TIME_MIN_MIN == 5, "clamp floor is 5 min for both timers");

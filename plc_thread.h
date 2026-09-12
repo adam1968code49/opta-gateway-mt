@@ -186,7 +186,30 @@ static void pollPlcStateInto(PlcSnapshot& w) {
     "A1","A2","A3","A4","A5","A6","A7","A8","A9","A10","A11","A12","A13","A14","A15" };
   static const char* const ST_N[N_STATE - N_ACTION] = {
     "START","STOP","RESET","PURGE","State1","State2","Fan1","Fan2",
-    "TopA","TopB","BotA","BotB" };
+    "TopA","TopB","BotA","BotB",
+    "TopAo","TopBo","BotAo","BotBo" };      // batch 14: the OPEN limit switches
+
+  //  batch 14: resolve each door side from its sensor PAIR. One bit cannot
+  //  tell "open" from "stopped halfway" from "sensor dead"; two can:
+  //    open=1 closed=0 -> open      open=0 closed=1 -> shut
+  //    both 0          -> mid       both 1          -> ?? (conflicting)
+  //    either unread   -> ?
+  {
+    static const char* const SIDE_N[4] = { "TA", "TB", "BA", "BB" };
+    char*  d = w.doorStat;
+    size_t dcap = PlcSnapshot::DOORSTAT_CAP, dused = 0;
+    d[0] = 0;
+    for (size_t s = 0; s < 4 && dused < dcap - 10; s++) {
+      const size_t kc = SSLOT_DOOR_CLOSED0 + s, ko = SSLOT_DOOR_OPEN0 + s;
+      const char* v;
+      if (!ok[kc] || !ok[ko])                             v = "?";
+      else if (vals[ko] > 0.5f && vals[kc] > 0.5f)        v = "??";
+      else if (vals[ko] > 0.5f)                           v = "open";
+      else if (vals[kc] > 0.5f)                           v = "shut";
+      else                                                v = "mid";
+      dused += snprintf(d + dused, dcap - dused, "%s%s:%s", s ? " " : "", SIDE_N[s], v);
+    }
+  }
 
   char*  txt = w.stateText;
   size_t cap = PlcSnapshot::STATETEXT_CAP;

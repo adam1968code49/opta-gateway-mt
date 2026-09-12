@@ -215,7 +215,10 @@ static const char* const STATE_TAGS[] = {
   TAG_ACTION_11, TAG_ACTION_12, TAG_ACTION_13, TAG_ACTION_14, TAG_ACTION_15,
   TAG_START_BUTTON, TAG_STOP_BUTTON, TAG_RESET_BUTTON, TAG_PURGE_BUTTON,
   TAG_STATE_1, TAG_STATE_2, TAG_FAN1, TAG_FAN2,
-  TAG_IND_TOPA, TAG_IND_TOPB, TAG_IND_BOTA, TAG_IND_BOTB
+  TAG_IND_TOPA, TAG_IND_TOPB, TAG_IND_BOTA, TAG_IND_BOTB,
+  //  batch 14: appended, never inserted -- plcStateWord bit order is
+  //  historical data in InfluxDB. These become bits 12..15.
+  TAG_IND_TOPA_OPEN, TAG_IND_TOPB_OPEN, TAG_IND_BOTA_OPEN, TAG_IND_BOTB_OPEN
 };
 #define N_STATE  (sizeof(STATE_TAGS) / sizeof(STATE_TAGS[0]))
 #define N_ACTION 15
@@ -234,7 +237,11 @@ static_assert(tagSlotIs(VALVE_TAGS[VSLOT_TEMP_ERROR],  TAG_TEMP_ERROR),  "VSLOT_
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_GEN_ERROR],   TAG_GEN_ERROR),   "VSLOT_GEN_ERROR drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_POS_S4],      TAG_POS_S4),      "VSLOT_POS_S4 drifted");
 static_assert(tagSlotIs(VALVE_TAGS[VSLOT_V_S5],        TAG_V_S5),        "VSLOT_V_S5 drifted");
-static_assert(N_STATE == 27,  "15 actions + 12 state bits");
+static_assert(N_STATE == 31,  "15 actions + 12 state bits + 4 door-open indicators (batch 14)");
+//  Door indicator slots: closed at 23..26, open at 27..30 (stateWord bits
+//  8..11 and 12..15). doorStat pairs them side by side.
+#define SSLOT_DOOR_CLOSED0 23
+#define SSLOT_DOOR_OPEN0   27
 static_assert(N_ACTION < N_STATE, "action bits come first");
 
 //  Trip history ring in the PLC, newest first (the HMI reads them in this

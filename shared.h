@@ -37,6 +37,7 @@ struct PlcSnapshot {
   static constexpr size_t LASTERR_CAP   = 48;
   static constexpr size_t FAILTAG_CAP   = 40;
   static constexpr size_t STATETEXT_CAP = 128;
+  static constexpr size_t DOORSTAT_CAP  = 40;   // "TA:shut TB:shut BA:open BB:mid" + room for '?'
 
   uint32_t seq;            // monotonic, bumped on every publish
   uint32_t stampMs;        // millis() at publish, so main can age it
@@ -57,6 +58,7 @@ struct PlcSnapshot {
   uint32_t actionWord;                 // bit N = Action_(N+1)
   uint32_t stateWord;                  // Start,Stop,Reset,Purge,State_1,State_2,Fan1,Fan2,TopA,TopB,BotA,BotB
   char     stateText[STATETEXT_CAP];   // one line, '?' prefix when a tag was unread
+  char     doorStat[DOORSTAT_CAP];     // batch 14: "TA:shut TB:shut BA:open BB:mid" from the open+closed pairs
   int32_t  stateFails;
   uint32_t stateSeq;                   // +1 each time the state sweep ran; main assigns only on change
   int32_t  adsorpElapsedS;             // Timer_3.ACC / 1000
