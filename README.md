@@ -109,6 +109,15 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   send (16 records / 512 points landed in the year 2102 overnight -- undeletable on Cloud Serverless, harmless to
   time-ranged dashboards; ops queries must bound time <= now()).
 
+- 2026-09-11 19:10 PT batch 12 on IP2 via OTA, fw 5bee9cb: three momentary READWRITE buttons
+  clearPressError/clearTempError/clearGenError -> PLC writeBool(<fault tag>, false) behind the same gates as
+  Reset Button, read-back verdict in lastError after 4 s (cleared -> confirmed / re-asserted by PLC / unverified),
+  text latched 60 s in the ok gaps. Boot counter n=79 -> 80 (one boot this OTA). Gate path proven with the master
+  switch off: API press -> lastError "control disabled", button back to false, PLC untouched. Dashboard
+  "IP2 AWG v8" (ee836a7b) built from the v7 CLI template with the buttons under the fault Status widgets (REST
+  PUT drops pages -> mobile breaks, so v7 was not edited). genError was TRUE on the machine at the time; the
+  confirmed/re-asserted branch is Adam's to exercise. See docs/batch12-final-review.md.
+
 ## CI
 
 `.github/workflows/build.yml` compiles every push to `main` (and every PR) with `arduino-cli 1.4.1`,
