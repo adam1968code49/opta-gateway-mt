@@ -118,7 +118,7 @@ static bool serialConfigStored(char* ssidOut, size_t cap) {
 static EthernetServer cfgServer(80);
 
 // Read one CRLF-terminated line, bounded time and length.
-static bool readHttpLine(EthernetClient& c, char* buf, size_t cap) {
+static bool readHttpLine(Client& c, char* buf, size_t cap) {   // Client&: the Ethernet page and the batch 16 hotspot page share it
   size_t i = 0;
   unsigned long t0 = millis();
   while (millis() - t0 < 500) {
@@ -166,6 +166,8 @@ static bool parseParam(const char* body, const char* name, char* out, size_t cap
   return false;
 }
 
+#include "wifi_portal.h"   // batch 16: setup hotspot; needs readHttpLine/parseParam/serialConfigApply above
+
 static void sendConfigPage(EthernetClient& c, const char* msg) {
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -206,6 +208,9 @@ static void sendConfigPage(EthernetClient& c, const char* msg) {
             "<input type='submit' value='Save &amp; reboot'></form>"
             "<p><a href='/clear'>Clear override (revert to firmware default) &amp; reboot</a></p>"
             "<p><a href='/episode'>Last offline episode (flight recorder)</a></p>"
+            "<form method='POST' action='/portal' style='display:inline'>"
+            "<input type=submit value='Open the setup hotspot on next boot'></form>"
+            " <span style='color:#666'>(batch 16: WiFi \"IP2-setup\", page at 192.168.3.1; or hold the USER button at power-up)</span>"
 #if USB_LOG_ENABLE
             "<p><a href='/log'>View the current USB log file</a>"
             " &nbsp;|&nbsp; <a href='/files'>Manage log files (view / delete)</a></p>"
@@ -238,7 +243,13 @@ static void handleConfigClient() {
     if (strncasecmp(line, "Content-Length:", 15) == 0) contentLen = atoi(line + 15);
   }
 
-  if (strcmp(method, "POST") == 0 && strcmp(path, "/save") == 0) {
+  if (strcmp(method, "POST") == 0 && strcmp(path, "/portal") == 0) {
+    //  batch 16: arm the setup hotspot for the next boot. POST, not GET, for
+    //  the same reason /rm is: a prefetched link must not arm anything.
+    wifiPortalRequest();
+    sendConfigPage(client, "Setup hotspot armed for the next boot (10 min window, then normal start).");
+    client.stop();
+  } else if (strcmp(method, "POST") == 0 && strcmp(path, "/save") == 0) {
     char body[256] = {0};
     int n = 0;
     unsigned long t0 = millis();
@@ -474,6 +485,7 @@ void setup() {
 
   // ---- Arduino Cloud over WiFi -------------------------------------------
   loadWifiConfig();
+  wifiPortalBoot(wifiSsid);                 // batch 16: setup hotspot if asked/needed; blocks up to 10 min, then continues here
   static WiFiConnectionHandler cloudConn(wifiSsid, wifiPass);
   {
     TimeoutTable t = DefaultTimeoutTable;
@@ -517,6 +529,7 @@ void loop() {
   wdWhereMain(WD_AT_WEB);
   handleConfigClient();
   serialConfigPoll();
+  wifiPortalNoteRunning();                  // batch 16: first association zeroes the no-association boot counter
   wdWhereMain(WD_AT_NONE);
 
   unsigned long now = millis();
