@@ -1112,4 +1112,10 @@
 //  and lives in a metal cabinet; a phone on 5 GHz outside the door proves
 //  nothing about what the module can hear.
 #define WIFI_FORCE_SECURITY    1
+//  batch 16 setup hotspot (WiFi.beginAP config portal), ABANDONED 2026-09-16:
+//  the board-side AP works (opens, associates, serves 192.168.3.1), but phones
+//  roam off a no-internet AP / do not take a DHCP lease, so it was not usable
+//  for operators in the field. Left in the tree behind this flag, OFF. Turn it
+//  to 1 to compile wifi_portal.h back in (see docs/batch16-final-review.md).
+#define WIFI_PORTAL_ENABLE     0
 #define WIFI_FORCE_MS          60000UL   // try at most this often while down

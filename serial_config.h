@@ -41,11 +41,17 @@ static bool serialConfigStored(char* ssidOut, size_t cap);
 //  the next boot can tell an operator-driven restart from an unexplained one.
 inline void bootMarkIntentional(const char* tag);
 
+#if WIFI_PORTAL_ENABLE
 static void wifiPortalRequest();   // wifi_portal.h (batch 16), included later in the sketch
+#endif
 
 inline void serialConfigHelp() {
+#if WIFI_PORTAL_ENABLE
   LOGLN("[CFG] commands: show | ssid <name> | pass <secret> | save | clear | portal | help");
   LOGLN("[CFG]   portal = open the setup hotspot (WiFi 'IP2-setup', http://192.168.3.1/) on the next boot");
+#else
+  LOGLN("[CFG] commands: show | ssid <name> | pass <secret> | save | clear | help");
+#endif
 }
 
 inline void serialConfigPoll() {
@@ -110,10 +116,12 @@ inline void serialConfigPoll() {
       }
     }
 
+#if WIFI_PORTAL_ENABLE
     else if (!strcmp(line, "portal")) {          // batch 16: open the setup hotspot on the next boot
       wifiPortalRequest();
       LOGLN("[CFG] setup hotspot armed for the next boot: WiFi 'IP2-setup', page at http://192.168.3.1/ (10 min window)");
     }
+#endif
     else if (!strcmp(line, "clear")) {
       serialConfigClear();
       LOGLN("[CFG] override cleared -- rebooting onto the arduino_secrets.h default");

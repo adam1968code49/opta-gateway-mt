@@ -166,7 +166,9 @@ static bool parseParam(const char* body, const char* name, char* out, size_t cap
   return false;
 }
 
+#if WIFI_PORTAL_ENABLE
 #include "wifi_portal.h"   // batch 16: setup hotspot; needs readHttpLine/parseParam/serialConfigApply above
+#endif
 
 static void sendConfigPage(EthernetClient& c, const char* msg) {
   c.print(F("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
@@ -208,9 +210,11 @@ static void sendConfigPage(EthernetClient& c, const char* msg) {
             "<input type='submit' value='Save &amp; reboot'></form>"
             "<p><a href='/clear'>Clear override (revert to firmware default) &amp; reboot</a></p>"
             "<p><a href='/episode'>Last offline episode (flight recorder)</a></p>"
+#if WIFI_PORTAL_ENABLE
             "<form method='POST' action='/portal' style='display:inline'>"
             "<input type=submit value='Open the setup hotspot on next boot'></form>"
             " <span style='color:#666'>(batch 16: WiFi \"IP2-setup\", page at 192.168.3.1; or hold the USER button at power-up)</span>"
+#endif
 #if USB_LOG_ENABLE
             "<p><a href='/log'>View the current USB log file</a>"
             " &nbsp;|&nbsp; <a href='/files'>Manage log files (view / delete)</a></p>"
@@ -243,13 +247,16 @@ static void handleConfigClient() {
     if (strncasecmp(line, "Content-Length:", 15) == 0) contentLen = atoi(line + 15);
   }
 
+#if WIFI_PORTAL_ENABLE
   if (strcmp(method, "POST") == 0 && strcmp(path, "/portal") == 0) {
     //  batch 16: arm the setup hotspot for the next boot. POST, not GET, for
     //  the same reason /rm is: a prefetched link must not arm anything.
     wifiPortalRequest();
     sendConfigPage(client, "Setup hotspot armed for the next boot (10 min window, then normal start).");
     client.stop();
-  } else if (strcmp(method, "POST") == 0 && strcmp(path, "/save") == 0) {
+  } else
+#endif
+  if (strcmp(method, "POST") == 0 && strcmp(path, "/save") == 0) {
     char body[256] = {0};
     int n = 0;
     unsigned long t0 = millis();
@@ -485,7 +492,9 @@ void setup() {
 
   // ---- Arduino Cloud over WiFi -------------------------------------------
   loadWifiConfig();
+#if WIFI_PORTAL_ENABLE
   wifiPortalBoot(wifiSsid);                 // batch 16: setup hotspot if asked/needed; blocks up to 10 min, then continues here
+#endif
   static WiFiConnectionHandler cloudConn(wifiSsid, wifiPass);
   {
     TimeoutTable t = DefaultTimeoutTable;
@@ -529,7 +538,9 @@ void loop() {
   wdWhereMain(WD_AT_WEB);
   handleConfigClient();
   serialConfigPoll();
+#if WIFI_PORTAL_ENABLE
   wifiPortalNoteRunning();                  // batch 16: first association zeroes the no-association boot counter
+#endif
   wdWhereMain(WD_AT_NONE);
 
   unsigned long now = millis();
