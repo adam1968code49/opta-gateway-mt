@@ -130,6 +130,13 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   dead-heading against a closed suction line). Dashboard "IP2 AWG v10" (da197c23), includes Adam's hand-added
   Purge_button. See docs/batch13-final-review.md.
 
+- 2026-09-18 batch 17 built (fw 10ddbf4), OTA queued -- IP2 powered down for hardware work at the time: the board becomes
+  IP2's ONLY InfluxDB writer (AWH_Bridge forwarding for IP_2_thing switched off by Adam at 09:33 PT). 10 s live feed from the
+  batch-11 ring (now capturing unconditionally) + 120 s slow-analog ring + on-change discretes with a 10 min re-arm heartbeat +
+  strings via value_str; one body per pass, steady state capped at one POST per 10 s, full-speed backlog drain, seconds
+  precision, same tags so dashboards are untouched. Static RAM +10.2 KB (259048). Acceptance (10 s spacing, ms=0, heartbeat
+  points, heapFree steady, cloudMs ~2.3 s peaks) pending the board's return. See docs/batch17-final-review.md.
+
 ## CI
 
 `.github/workflows/build.yml` compiles every push to `main` (and every PR) with `arduino-cli 1.4.1`,
