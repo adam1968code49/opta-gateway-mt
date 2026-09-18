@@ -48,7 +48,8 @@
 //  float `value=`, booleans as 0.000/1.000, matching the field type the
 //  bridge established -- a mixed type on one field is a rejected write.
 //
-//  RAM: layer 2 3.8 KB, layer 3 3 KB, layer 4 2 KB, all static. Zero
+//  RAM: layer 2 1.9 KB, layer 3 1.5 KB, layer 4 1 KB, all static (17.1 halved
+//  them: with the full set heapFree ran 8.2 KB steady / 3 KB at the TLS peak). Zero
 //  dynamic allocation, no String, no recursion.
 // =====================================================================
 
@@ -65,9 +66,9 @@
 #include "influx_replay.h"   // ring, rpLine, rpBuildBatch, rpDropOldest, rpRejectOldest, replayCaptureTick, RP_* gates
 
 #define FEED_SLOW_MS        120000UL
-#define FEED_SLOW_MAX       30            // 1 h of layer-2 records
-#define FEED_CHG_MAX        256           // layer-3 queue
-#define FEED_STR_MAX        16            // layer-4 queue
+#define FEED_SLOW_MAX       15            // 30 min of layer-2 records (17.1: was 30; heapFree sat at 8.2 KB steady, 3 KB at the TLS peak)
+#define FEED_CHG_MAX        128           // layer-3 queue (17.1: was 256)
+#define FEED_STR_MAX        8             // layer-4 queue (17.1: was 16)
 #define FEED_STR_CAP        120           // text stored per string entry (plcStateText cap is 128)
 #define FEED_POS_DEADBAND   0.5f          // proportional valve position: change worth a row
 #define FEED_REBASE_MS      600000UL      // review C1: re-send every on-change value every 10 min. The bridge re-sent

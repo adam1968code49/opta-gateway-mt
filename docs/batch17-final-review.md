@@ -29,9 +29,24 @@ Adam(2026-09-18):把批 11"仅云断时直补"升级为**常态也由板子直�
 - 核实无误(Q1):四种结果下的出队簿记无漏发无重发;`u1==0`/`n1==0` 两条早退分支正确。Q4:全部 `precision=s` 整秒,数值全 float 无 `i` 后缀。Q5:转义缓冲 248 足够 122 个引号。Q6:用钉死的 `arm-none-eabi-g++ 7.2.1` 实测无告警。Q7:云线程栈增量 ≤ 500 B。
 - 未采纳:M2(`st[128]` 理论上超长,实际约 100 字)、M3(积压期第 2 层等第 1 层排完,环 1 h 够)。
 
-## 验收(待 IP2 上电)
+## 验收(2026-09-18 14:38–14:44 PT,IP2 上电后)
 
-IP2 当天断电改硬件,OTA `10ddbf4` 排队,上电重连即装。上板后核:库里 `IP_2_thing` 恢复写入;`t1HotTank` 点间距 10 s、时间戳毫秒位 0;`valveS1` 只在变化处出点,且每 10 min 有心跳点;`lastError` 走 `value_str`;`pushStat` 为 `live q=…`;`heapFree` 稳态(低于 8 KB 则第 2 层环缩 15 条);`cloudMs` 每 10 s 一个 ~2.3 s 峰。
+IP2 断电改硬件约 5 h;14:06 曾连上云一瞬(只发出 SYNC 时的 `controlEnabled=false`)又掉,14:38 稳定回来,OTA 立即投递、成功,`fwVersion 10ddbf4`,n=91→93。5 分钟内:
+
+| 项 | 结果 |
+|---|---|
+| 库里恢复写入 | 1210 行、142 个变量(桥时期 160,差的是有意不进库的按钮/自指量) |
+| 第 1 层节奏 | `t1HotTank` 32 点,间距全部 10 s,毫秒位全 0 |
+| 第 2 层 | `hpLoopTemp`/`uptimeS` 每 120 s 一点 |
+| 第 3 层 | `valveS1` 基线 + 1 次变化;`hpHtgSp1`/`posS4`/`pumpCond`/`controlEnabled` 各 1(基线) |
+| 第 4 层 | `plcStateText`/`doorStat`/`lastError` 以 `value_str` 落库 |
+| pushStat | `live q=0/0/0/0 sent=32+120 posts=22/0 last=204 drop=0 rej=0+0 badt=0` |
+| 云线程 | `cloudMs` 2 ms(POST 在 update() 之外,不计入);`wifiRssi` −17 |
+| **RAM** | `heapFree` 开机 8600、330 s 时 **8168**;自检握手时 8600→**3528**。太贴地 → 批 17.1 |
+
+### 批 17.1:缓冲缩半(同日)
+
+`FEED_SLOW_MAX 30→15`(慢变量断网缓存 1 h→30 min)、`FEED_CHG_MAX 256→128`、`FEED_STR_MAX 16→8`,静态 RAM 收回约 4.4 KB;**第 1 层 32 个连续量的 1 小时缓存不变**。预期 `heapFree` 稳态 ≈ 12.5 KB、握手低点 ≈ 7.5 KB。上板后再核一次 `heapFree`。
 
 ## 操作员须知
 
