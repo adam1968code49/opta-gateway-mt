@@ -134,8 +134,16 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   IP2's ONLY InfluxDB writer (AWH_Bridge forwarding for IP_2_thing switched off by Adam at 09:33 PT). 10 s live feed from the
   batch-11 ring (now capturing unconditionally) + 120 s slow-analog ring + on-change discretes with a 10 min re-arm heartbeat +
   strings via value_str; one body per pass, steady state capped at one POST per 10 s, full-speed backlog drain, seconds
-  precision, same tags so dashboards are untouched. Static RAM +10.2 KB (259048). Acceptance (10 s spacing, ms=0, heartbeat
-  points, heapFree steady, cloudMs ~2.3 s peaks) pending the board's return. See docs/batch17-final-review.md.
+  precision, same tags so dashboards are untouched. Static RAM +10.2 KB (259048). See docs/batch17-final-review.md.
+- 2026-09-18 14:38 PT batch 17 applied on IP2 (fw 10ddbf4, n=91 -> 93) the moment the board came back from a ~5 h
+  power-down for hardware work (it had touched the cloud once at 14:06 and dropped). Accepted within 5 min: 1210 rows /
+  142 variables in InfluxDB, t1HotTank every 10 s with ms=0, layer 2 every 120 s, layer 3 baseline + changes, strings in
+  value_str, pushStat `live q=0/0/0/0 ... posts=22/0 last=204`, cloudMs 2 ms. heapFree read 8168 at 330 s.
+- 2026-09-18 15:07 PT batch 17.1 on IP2 via OTA, fw 05b2529, n=93 -> 94: layer-2/3/4 buffers halved (slow ring 15 =
+  30 min, change queue 128, strings 8; the 1 h layer-1 ring unchanged), static RAM 259048 -> 254568. heapFree 12432 at
+  271 s, feed unchanged (10 s, ms=0, posts 16/0). CORRECTION: the layer-2 history shows 10ddbf4 at 16.1-16.4 KB free
+  after 25 min -- the 8168 that motivated the trim was a boot transient. Judge heap on >= 20 min of steady state, not at
+  boot. Follow-ups noted in docs/batch17-final-review.md (string queue during the settle window; first zero diag sample).
 
 ## CI
 
