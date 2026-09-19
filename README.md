@@ -144,6 +144,14 @@ tags into a snapshot; main publishes them. Nothing else is migrated yet.
   271 s, feed unchanged (10 s, ms=0, posts 16/0). CORRECTION: the layer-2 history shows 10ddbf4 at 16.1-16.4 KB free
   after 25 min -- the 8168 that motivated the trim was a boot transient. Judge heap on >= 20 min of steady state, not at
   boot. Follow-ups noted in docs/batch17-final-review.md (string queue during the settle window; first zero diag sample).
+- 2026-09-18 evening: REBOOT STORM on 05b2529 once the Starlink uplink started flapping -- n=95 (unlogged), n=96 `off 22m
+  p=4/22 fo=3` (ladder), n=97 `wd giveup @4 cloud 301s`, n=98 `off 22m p=23/12`. Root cause of the wd giveup: BearSSL's
+  handshake loop has no timeout and relies on connected(), which on mbed reflects the WiFi interface, not the TCP peer;
+  a half-open socket spins the cloud thread past its 300 s budget. Batch 11 hit that path rarely, batch 17 every 10 s.
+  Adam's call: roll the live feed back (influx_feed.h removed; influx_replay.h / cloud_thread.h back to the batch-15
+  behaviour), KEEP the fix -- DeadlineClient in influx_push.h bounds every POST to 20 s (code -4) -- and stop reading
+  WiFi.RSSI() while not associated (94 s stall @16 seen the same evening). The bridge must forward IP_2_thing again.
+  Batch 17's design and plant results stay in docs/batch17-final-review.md for when the feed comes back.
 
 ## CI
 

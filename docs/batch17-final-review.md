@@ -54,6 +54,20 @@ IP2 断电改硬件约 5 h;14:06 曾连上云一瞬(只发出 SYNC 时的 `contr
 
 **留项**:(a) 开机 2 min 稳定期内字串队列 8 条不够,`drop=4`(7 条基线 + 几次 lastError/doorStat 变化),被 10 min 心跳补回,无数据后果;要更严可把 `FEED_STR_MAX` 回到 12(+512 B)。(b) 每次开机第 2 层的第一条 `heapFree`/`uptimeS` 样本是 0(诊断 CloudInt 尚未算出),可在 `feedCaptureSlow` 里对 `uptimeS==0` 跳过诊断位。
 
+## 回滚(批 17.3,2026-09-18 晚)— 直写功能撤下,保留"截止时间门"
+
+**现象**:17.1 上板后 2 h 43 min 稳跑,随后上游(Starlink)在傍晚反复抖动,板子接连重启:n=95(未留下记录)、n=96 `off 22m p=4/22 fo=3`(阶梯复位,探针 26 次失败 22 次)、**n=97 `wd giveup @4 cloud 301s`**、n=98 `off 22m p=23/12`。Adam 决定**暂时回滚到稳定版、不上直写功能,同时把这类问题尽量修掉**。
+
+**根因(`wd giveup @4`)**:`influxPush()` 里 BearSSL 的握手循环 `run_until()`(ssl_io.c:123–131)对底层 `read()` 的"暂无数据"只是 `continue`,无超时,只靠 `connected()` 变 false 退出;而 mbed 的 `MbedClient::connected()` = `status() || available()`,`status()` **只反映 WiFi 接口是否在线,不反映 TCP 对端**。上游在握手中途一抖,TCP 半开、接口仍在线 → 云线程在 where=4 自旋到 300 s 预算耗尽 → 看门狗放弃重启。批 11 这条路只在断网后走几次,撞不上;批 17 每 10 s 走一次,第一个坏天气的傍晚就成了重启风暴。
+
+**修(17.2,保留)**:`influx_push.h` 新增 `DeadlineClient`——夹在 `WiFiClient` 和 `BearSSLClient` 之间的 `Client` 包装,`influxPush()` 进入时武装 `INFLUX_DEADLINE_MS` 20 s;到点后 `connected()` 返 0、`read()` −1、`write()` 0,BearSSL 的 `clientRead/clientWrite` 把它们变成 IO 错误,`run_until` 让引擎失败,一次 POST 以 code −4 结束。不改库。Opus 复审:(C1)门过期后 `BearSSLClient::stop()` 整体被 `if(connected())` 跳过、半开 socket 和读线程漏到下次重试 → 在 `s_pushSsl.stop()` 后再 `s_pushTcp.stop()`(有界、幂等);(I2)>20 s 的慢成功会被覆写成 −4 → 只在 `code<0` 时覆写;(I3)`WiFiClient::connect()` 在门之外:DNS 5 s×3 + 裸 TCP 无 `set_timeout`(SYN 重试约 60–90 s),单次最坏约 130 s,仍在 300 s 内但只有 2 倍余量 → 超 30 s 记日志;`using Print::write;` 卫生项。
+
+**回滚**:`influx_replay.h`、`cloud_thread.h` 恢复到批 15 时的版本(= 板上稳定版 `cac5e18` 的行为:仅云断时缓存、恢复后回放),删除 `influx_feed.h`。**批 17 的四层直写设计和实测结果留档在上文**,以后要恢复:从 `05b2529` 取回 `influx_feed.h` 与两处改动,叠加本节的门即可。
+
+**同晚另见**(老代码路径,非本批):`loopStallMs` 228 s @14(`WiFi.begin` 关联)和 94 s @16(诊断块的 `WiFi.RSSI()` 驱动调用)——WiFi 驱动在 AP 抖动时长时间卡住,看门狗按设计兜底。17.3 顺手把 `WiFi.RSSI()` 改为仅在 `WL_CONNECTED` 时读,减少一半暴露面;@14 那一处无法从固件侧加超时。
+
+**后果**:回滚后 IP2 的常态历史又依赖 AWH_Bridge——**需把桥对 `IP_2_thing` 的转发重新打开**。
+
 ## 操作员须知
 
 1. IP2 的历史数据现在**只**来自板子;桥对 IP2 已关,别再开回来(会双写)。

@@ -47,6 +47,7 @@
 #define RP_KEY_CHUNK_FMT    "rp_%u"
 #define RP_META_MAGIC       0x52500000UL   // 'RP' + layout version 0 in the high half of the meta int; count in the low 16 bits
 #define RP_FRESH_MS         (3 * SAMPLE_INTERVAL_MS)   // a snapshot older than this is a stalled PLC thread, not a reading
+#define RP_MIN_DOWN_MS      5000UL    // connected() must have been false this long before the first capture: a one-pass blip is not an outage
 #define RP_LIVE_AFTER_MS    60000UL   // drain live (probe path) only once the outage is this old; shorter ones drain after the 2 min settle
 #define RP_EPOCH_MIN        1600000000UL   // 2020-09: RTC not set
 #define RP_EPOCH_MAX        2000000000UL   // 2033-05: RTC garbage (2026-09-11 a batch landed in the year 2102)
@@ -241,19 +242,62 @@ inline void replayLoad() {
 }
 
 
-//  CLOUD THREAD, every pass. Batch 17: the ring is no longer an outage-only
-//  buffer -- it is the live 10 s feed. One record every RP_PERIOD_MS whether
-//  the cloud is up or not; influx_feed.h drains it (and the slower layers)
-//  right after each capture when the path is real, and lets it fill to the
-//  hour when it is not. Returns true on the pass that captured, so the
-//  drain can start on the same pass.
-static bool replayCaptureTick(unsigned long now) {
+static void rpStatus(int lastCode) {
+  char st[128];
+  snprintf(st, sizeof st, "replay q=%u sent=%lu posts=%lu/%lu last=%d drop=%lu rej=%lu badt=%lu",
+           (unsigned)s_rpCount, (unsigned long)s_rpSentRecs, (unsigned long)s_rpPosts,
+           (unsigned long)s_rpPostFails, lastCode, (unsigned long)s_rpDropped, (unsigned long)s_rpRejected, (unsigned long)s_rpBadEpoch);
+  pushStatSet(st);
+}
+
+//  CLOUD THREAD, every pass, after update() and the ladder.
+static void replayTick(unsigned long now, bool cloudUp) {
   SHARED_ASSERT_ON_CLOUD();
-  if (!cloudSideHasSnapshot()) return false;
-  if (s_rpLastCapMs != 0 && now - s_rpLastCapMs < RP_PERIOD_MS) return false;
-  s_rpLastCapMs = now;
-  replayCapture(cloudSideSnapshot(), now);
-  return true;
+  static unsigned long downSince = 0;           // first pass that saw connected() false; 0 = up
+  if (!cloudUp) {
+    s_rpCloudUpSince = 0;
+    if (downSince == 0) downSince = now;
+    //  connected() flickers false for a single pass some 40 times a night
+    //  (2026-09-10/11) with the session otherwise fine: no capture, no POST
+    //  for those. An outage starts being recorded after RP_MIN_DOWN_MS.
+    if (now - downSince >= RP_MIN_DOWN_MS && cloudSideHasSnapshot()
+        && (s_rpLastCapMs == 0 || now - s_rpLastCapMs >= RP_PERIOD_MS)) {
+      s_rpLastCapMs = now;
+      replayCapture(cloudSideSnapshot(), now);
+    }
+  } else {
+    downSince = 0;
+    if (s_rpCloudUpSince == 0) {
+      s_rpCloudUpSince = now;
+      if (s_rpCount) rpStatus(0);                 // first pass back: the queue is visible on the dashboard before anything is sent
+    }
+  }
+  if (s_rpCount == 0) return;
+  //  Drain live (probe path, Arduino Cloud still down) only once the outage
+  //  is RP_LIVE_AFTER_MS old -- a short one is not worth a TLS session while
+  //  the MQTT client is busy reconnecting; it drains after the 2 min settle.
+  if (!cloudUp && now - downSince < RP_LIVE_AFTER_MS) return;
+  if (cloudUp && now - s_rpCloudUpSince < RP_SETTLE_MS) return;
+  if (!influxPushReady(now)) return;
+
+  static char body[INFLUX_MAX_BODY];
+  uint16_t used = 0;
+  size_t n = rpBuildBatch(body, sizeof body, RP_PER_POST, &used);
+  if (used == 0) { if (s_rpCount) { s_rpCount--; s_rpDropped++; } return; }   // a record that cannot be encoded is not worth a hang
+  if (n == 0) { rpRejectOldest(used); return; }             // only unusable records in this batch: nothing to send
+  int code = influxPush(body, n);
+  s_rpPosts++;
+  if (code >= 200 && code < 300) rpDropOldest(used);
+  else {
+    s_rpPostFails++;
+    //  The server read the body and refused it: retrying the same bytes
+    //  forever would wedge the queue head (review C3). Drop that batch,
+    //  count it, move on. Auth/bucket errors and transport failures keep
+    //  the data and back off (influxPush handles the pacing).
+    if (code == 400 || code == 413 || code == 422) rpRejectOldest(used);
+  }
+  rpStatus(code);
+  LOG("[REPLAY] "); LOG((int)used); LOG(" rec -> code "); LOG(code); LOG(", left "); LOGLN((int)s_rpCount);
 }
 
 #endif // INFLUX_REPLAY_H

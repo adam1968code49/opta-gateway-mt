@@ -55,15 +55,61 @@
 #define INFLUX_SUCCESS_GAP_MS    2000UL   // after a 2xx the next POST may follow this soon (review C1: 30 s here made a 60 min drain)
 #define INFLUX_SELFTEST_AFTER_MS 60000UL  // one minute of cloud-up before the experiment
 
-static WiFiClient    s_pushTcp;
-static BearSSLClient s_pushSsl(s_pushTcp, TAs, TAs_NUM);   // file-scope: its TLS buffers must not live on the thread stack
+#define INFLUX_DEADLINE_MS       20000UL  // one whole POST (DNS, TCP, TLS handshake, write, status line) must finish in this
+
+//  DEADLINE GATE (batch 17.2). Root cause of `wd giveup @4 cloud 301s`
+//  (IP2, 2026-09-18 20:04): BearSSL's run_until() (ssl_io.c) retries a
+//  zero-length read forever and only stops when the transport's connected()
+//  turns false -- but MbedClient::connected() is status() || available(),
+//  and status() reflects the WiFi INTERFACE, not the TCP peer. A Starlink
+//  flap in the middle of a handshake leaves a half-open socket on a live
+//  interface: the cloud thread spins in influxPush() until the 300 s feeder
+//  budget runs out. Batch 11 hit that path a few times a day; batch 17 hits
+//  it every 10 s, so the first bad evening produced the reboot storm.
+//
+//  The gate sits between WiFiClient and BearSSLClient. Once the deadline
+//  armed at influxPush() entry has passed, connected() answers 0, read()
+//  -1 and write() 0; BearSSL's clientRead/clientWrite turn those into an
+//  I/O failure, run_until() fails the engine, connectSSL() returns 0 and
+//  the POST ends with code -4 inside INFLUX_DEADLINE_MS. No library change.
+class DeadlineClient : public Client {
+public:
+  explicit DeadlineClient(Client& inner) : _c(inner) {}
+  using Print::write;                                       // the two write() overrides below would otherwise hide Print's
+  void arm(unsigned long deadlineMs) { _deadline = deadlineMs; _armed = true; _expired = false; }
+  bool expired() const { return _expired; }
+  int connect(IPAddress ip, uint16_t port) override { return past() ? 0 : _c.connect(ip, port); }
+  int connect(const char* host, uint16_t port) override { return past() ? 0 : _c.connect(host, port); }
+  size_t write(uint8_t b) override { return past() ? 0 : _c.write(b); }
+  size_t write(const uint8_t* buf, size_t n) override { return past() ? 0 : _c.write(buf, n); }
+  int available() override { return past() ? 0 : _c.available(); }
+  int read() override { return past() ? -1 : _c.read(); }
+  int read(uint8_t* buf, size_t n) override { return past() ? -1 : _c.read(buf, n); }
+  int peek() override { return past() ? -1 : _c.peek(); }
+  void flush() override { if (!past()) _c.flush(); }
+  void stop() override { _c.stop(); }                       // always allowed: this is how the socket is released
+  uint8_t connected() override { return past() ? 0 : _c.connected(); }
+  operator bool() override { return (bool)_c; }
+private:
+  bool past() {
+    if (_armed && (long)(millis() - _deadline) >= 0) { _expired = true; return true; }
+    return false;
+  }
+  Client&       _c;
+  unsigned long _deadline = 0;
+  bool          _armed = false, _expired = false;
+};
+
+static WiFiClient     s_pushTcp;
+static DeadlineClient s_pushGate(s_pushTcp);
+static BearSSLClient  s_pushSsl(s_pushGate, TAs, TAs_NUM);  // file-scope: its TLS buffers must not live on the thread stack
 
 static unsigned long s_pushWait  = INFLUX_BACKOFF_MS;
 static unsigned long s_pushLast  = 0;
 static uint32_t      s_pushOks   = 0;
 static uint32_t      s_pushFails = 0;
 static int           s_pushMs    = 0;
-static int           s_pushCode  = 0;     // last HTTP status, or -1 refused / -2 connect / -3 no reply / 0 never
+static int           s_pushCode  = 0;     // last HTTP status, or -1 refused / -2 connect / -3 no reply / -4 deadline (17.2) / 0 never
 static unsigned long s_pushHeapPeakFree = 0;   // heapFree while connected (the real cost of the handshake)
 
 inline uint32_t influxPushOks()   { return s_pushOks; }
@@ -114,6 +160,7 @@ static int influxPush(const char* body, size_t len) {
   unsigned long t0 = millis();
   s_pushLast = t0;
   wdWhereCloud(WD_AT_PUSH);
+  s_pushGate.arm(t0 + INFLUX_DEADLINE_MS);     // batch 17.2: nothing below may outlive this
 
   int code = -2;
   if (s_pushSsl.connect(INFLUX_HOST, INFLUX_PORT)) {
@@ -153,8 +200,20 @@ static int influxPush(const char* body, size_t len) {
     }
   }
   s_pushSsl.stop();
+  //  Review C1: BearSSLClient::stop() is wrapped in `if (_client->connected())`,
+  //  so once the gate has expired it does nothing and the half-open TCP socket
+  //  (plus mbed's reader thread) would live on through the whole backoff.
+  //  MbedClient::stop() is idempotent and bounded (~100 ms join): always call it.
+  s_pushTcp.stop();
+  //  Review I2: stop() itself polls connected() and can trip the gate on a
+  //  SLOW SUCCESS (a 204 that took >20 s). Only a failure is re-labelled.
+  if (code < 0 && s_pushGate.expired()) code = -4;   // batch 17.2: deadline hit somewhere in the exchange (half-open socket)
   s_pushMs   = (int)(millis() - t0);
   s_pushCode = code;
+  //  Review I3: WiFiClient::connect() (DNS 5 s x 3, then a raw SYN retry of
+  //  60-90 s with no socket timeout) sits BEFORE the gate can act. Worst case
+  //  ~130 s of a 300 s cloud budget: make the slow ones visible.
+  if (s_pushMs > 30000) { LOG("[PUSH] SLOW: "); LOG(s_pushMs); LOGLN(" ms (connect phase is outside the deadline gate)"); }
   if (code >= 200 && code < 300) { s_pushOks++; s_pushWait = INFLUX_SUCCESS_GAP_MS; }
   else {
     s_pushFails++;
